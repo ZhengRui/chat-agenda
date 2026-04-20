@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meeting Flow Orchestrator</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.x.x/Sortable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.x.x/dist/html2canvas.min.js"></script>
+<script src="prompts.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/json.min.js"></script>
+<style>
+  [x-cloak] { display: none !important; }
+  .segment-card { cursor: grab; transition: all 0.15s ease; }
+  .segment-card:active { cursor: grabbing; }
+  .segment-card.sortable-chosen { opacity: 0.5; transform: scale(0.98); }
+  .segment-card.sortable-ghost { opacity: 0.3; border: 2px dashed #94a3b8; }
+  .chat-message { animation: fadeIn 0.2s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .resize-handle { height: 6px; cursor: row-resize; background: transparent; position: relative; flex-shrink: 0; z-index: 10; }
+  .resize-handle::before { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 32px; height: 3px; background: #d1d5db; border-radius: 2px; transition: background 0.15s; }
+  .resize-handle:hover::before, .resize-handle.active::before { background: #3b82f6; }
+  body.resizing * { user-select: none !important; cursor: row-resize !important; }
+  .json-content { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 11px; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 10px 14px; border-radius: 8px; max-height: 300px; overflow-y: auto; line-height: 1.5; }
+  .timeline-bar { transition: all 0.2s ease; cursor: pointer; min-width: 4px; }
+  .timeline-bar:hover { filter: brightness(0.9); }
+  .modal-overlay { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
+  .spinner { border: 2px solid #e2e8f0; border-top: 2px solid #3b82f6; border-radius: 50%; width: 16px; height: 16px; animation: spin 0.6s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .thinking-section { background: #fefce8; border-left: 3px solid #eab308; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 12px; color: #a16207; }
+  .thinking-section summary { cursor: pointer; font-weight: 600; font-size: 11px; color: #b45309; user-select: none; }
+  .thinking-section summary:hover { color: #92400e; }
+  .thinking-content { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; max-height: 200px; overflow-y: auto; }
+  .streaming-cursor::after { content: '|'; animation: blink 0.6s step-end infinite; color: #3b82f6; }
+  @keyframes blink { 50% { opacity: 0; } }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+</style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col font-sans antialiased" x-data="meetingApp()" x-init="init()">
+
+  <!-- Settings Modal -->
+  <div x-cloak x-show="showSettings" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center" @click.self="showSettings=false">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 mx-4 max-h-[80vh] overflow-y-auto" @click.stop>
+      <h2 class="text-lg font-bold text-gray-800 mb-4">API Settings</h2>
+      <template x-for="(cfg, name) in providers" :key="name">
+        <div class="mb-5 border border-gray-200 rounded-lg p-4">
+          <h3 class="text-sm font-bold text-gray-700 mb-2 uppercase" x-text="name"></h3>
+          <label class="block text-xs font-medium text-gray-500 mb-1">API Key</label>
+          <input x-model="cfg.apiKey" type="password" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none" placeholder="sk-...">
+          <label class="block text-xs font-medium text-gray-500 mb-1">Base URL</label>
+          <input x-model="cfg.baseUrl" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+          <label class="block text-xs font-medium text-gray-500 mb-1">Model</label>
+          <!-- DeepSeek: static model name, no selection needed -->
+          <div x-show="name === 'deepseek'" class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-600">model1</div>
+          <!-- Other providers: select dropdown -->
+          <select x-show="name !== 'deepseek'" x-model="cfg.model" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+            <template x-for="m in cfg.presetModels" :key="m">
+              <option :value="m" x-text="m"></option>
+            </template>
+            <option value="__custom__">Other (custom)...</option>
+          </select>
+          <input x-show="cfg.model === '__custom__' && name !== 'deepseek'" x-model="cfg._customModel" @input="cfg.model = $el.value" placeholder="Enter custom model name..."
+            class="w-full border rounded-lg px-3 py-2 mt-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+          <button @click="testConnection(name)" :disabled="!cfg.apiKey || testing"
+            class="mt-3 w-full px-2 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-40 disabled:cursor-not-allowed"
+            :class="testResults[name] === 'ok' ? 'bg-green-100 text-green-700' : (testResults[name] === 'fail' ? 'bg-red-100 text-red-500' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')">
+            <span x-show="testingProvider !== name" x-text="'Test ' + name"></span>
+            <span x-show="testingProvider === name" class="spinner"></span>
+          </button>
+        </div>
+      </template>
+      <button @click="saveSettings()" class="w-full px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition">Save</button>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0 z-10">
+    <div class="flex items-center gap-3">
+      <h1 class="text-lg font-bold text-gray-800">Meeting Flow</h1>
+      <span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">v0.3</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button @click="loadDemo()" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Load Demo</button>
+      <button @click="showSettings=true" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Settings</button>
+      <div class="w-px h-5 bg-gray-200"></div>
+      <button @click="viewMode='card'" class="px-3 py-1.5 text-xs font-medium rounded-lg transition" :class="viewMode==='card' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'">Cards</button>
+      <button @click="viewMode='timeline'" class="px-3 py-1.5 text-xs font-medium rounded-lg transition" :class="viewMode==='timeline' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'">Timeline</button>
+      <div class="w-px h-5 bg-gray-200"></div>
+      <button @click="exportJSON()" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Export JSON</button>
+      <button @click="exportImage()" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Export Image</button>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Left: Chat Panel -->
+    <div class="w-[35%] min-w-[360px] border-r border-gray-200 bg-white flex flex-col">
+      <div class="p-3 border-b border-gray-100 bg-gray-50">
+        <p class="text-xs text-gray-500 mb-2">Paste WeChat registration text below, then chat to fine-tune the agenda.</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-3 space-y-3" id="chatMessages" x-ref="chatContainer">
+        <template x-for="msg in messages" :key="msg.id">
+          <div class="chat-message">
+            <!-- System/Info message -->
+            <div x-show="msg.role==='info'" class="flex justify-center">
+              <span class="text-xs text-gray-400 bg-gray-50 px-3 py-1 rounded-full" x-text="msg.content"></span>
+            </div>
+            <!-- User message -->
+            <div x-show="msg.role==='user'" class="flex justify-end">
+              <div class="max-w-[85%] bg-blue-500 text-white rounded-2xl rounded-br-md px-4 py-2 text-sm whitespace-pre-wrap" x-text="msg.content"></div>
+            </div>
+            <!-- Assistant message -->
+            <div x-show="msg.role==='assistant'" class="flex justify-start">
+              <div class="max-w-[90%] bg-gray-100 text-gray-800 rounded-2xl rounded-bl-md px-4 py-2 text-sm">
+                <!-- Thinking process (collapsible) -->
+                <details x-show="msg.thinking" class="thinking-section" :open="msg.showThinking" @toggle="msg.showThinking=$el.open">
+                  <summary>Thought Process</summary>
+                  <div class="thinking-content" x-text="msg.thinking"></div>
+                </details>
+                <!-- Main content (plain text) -->
+                <div x-show="msg.content && !msg.isJson">
+                  <span x-text="msg.content" :class="{ 'streaming-cursor': msg.streaming }"></span>
+                </div>
+                <!-- Main content (JSON with syntax highlighting) -->
+                <div x-show="msg.content && msg.isJson" class="json-content" x-html="highlightJson(msg.content)"></div>
+                <div x-show="!msg.content && !msg.thinking" class="flex items-center gap-2">
+                  <span class="spinner"></span>
+                  <span class="text-xs text-gray-400">Thinking...</span>
+                </div>
+                <div x-show="msg.segments" class="mt-2 text-xs text-green-600 font-medium">
+                  Updated: <span x-text="msg.segments + ' segments'"></span>
+                </div>
+                <div x-show="msg.error" class="mt-1 text-xs text-red-500" x-text="msg.error"></div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+      <!-- Resize handle -->
+      <div class="resize-handle" :class="{ active: resizing }"
+        @mousedown="startResize($event)"></div>
+      <div class="p-3 border-t border-gray-200 flex flex-col" :style="'height:' + inputHeight + 'px'">
+        <!-- Provider & Model selector -->
+        <div class="flex items-center gap-2 mb-2 shrink-0">
+          <select x-model="activeProvider" class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+            <template x-for="(cfg, name) in providers" :key="name">
+              <option :value="name" x-text="name" :disabled="!cfg.apiKey"></option>
+            </template>
+          </select>
+          <!-- Model select (non-DeepSeek): x-effect forces browser to re-sync displayed value -->
+          <select x-show="activeProvider !== 'deepseek'"
+            x-effect="syncSelect($el, providers[activeProvider])"
+            @change="providers[activeProvider].model = $el.value"
+            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none flex-1">
+            <option value="__custom__">Other (custom)...</option>
+            <template x-for="m in providers[activeProvider].presetModels" :key="m">
+              <option :value="m" x-text="m"></option>
+            </template>
+          </select>
+          <span x-show="activeProvider === 'deepseek'" class="text-xs text-gray-500 px-2 py-1 flex-1">model1</span>
+          <input x-show="activeProvider !== 'deepseek' && providers[activeProvider].model === '__custom__'"
+            x-model="providers[activeProvider]._customModel"
+            @input="providers[activeProvider].model = $el.value"
+            placeholder="Custom model..."
+            class="text-xs border rounded-md px-2 py-1 flex-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+        </div>
+        <div class="flex gap-2 flex-1">
+          <textarea x-model="chatInput" @keydown.enter.prevent="handleEnter($event)"
+            placeholder="Paste WeChat text or type adjustment... (Enter to send, Shift+Enter for new line)"
+            class="flex-1 border rounded-xl px-4 py-2 text-sm resize-y focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none"
+            rows="5" :disabled="loading"></textarea>
+          <button @click="sendMessage()" x-show="!loading" :disabled="!chatInput.trim()"
+            class="shrink-0 w-10 h-10 bg-blue-500 text-white rounded-full flex items-center justify-center hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+          <button @click="stopGeneration()" x-show="loading"
+            class="shrink-0 w-10 h-10 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><rect x="5" y="5" width="10" height="10" rx="2"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Visualization -->
+    <div class="flex-1 overflow-y-auto p-4 bg-gray-50" id="vizPanel" x-ref="vizPanel">
+      <!-- Empty State -->
+      <div x-show="!meeting.segments.length" class="h-full flex items-center justify-center">
+        <div class="text-center text-gray-400">
+          <svg class="w-16 h-16 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <p class="text-sm">No agenda yet.</p>
+          <p class="text-xs mt-1">Paste WeChat registration text in the chat panel.</p>
+        </div>
+      </div>
+
+      <!-- Meeting Meta -->
+      <div x-show="meeting.segments.length" class="mb-4 bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="font-bold text-gray-800" x-text="'#' + meeting.meta.no + ' ' + meeting.meta.theme" x-show="meeting.meta.theme"></h2>
+            <h2 class="font-bold text-gray-800" x-text="meeting.meta.type + ' Meeting'" x-show="!meeting.meta.theme"></h2>
+            <div class="flex gap-4 mt-1 text-xs text-gray-500">
+              <span x-show="meeting.meta.date" x-text="meeting.meta.date"></span>
+              <span x-text="meeting.meta.startTime + ' - ' + meeting.meta.endTime"></span>
+              <span x-show="meeting.meta.manager" x-text="'MM: ' + meeting.meta.manager"></span>
+            </div>
+          </div>
+          <div class="text-right text-xs text-gray-400">
+            <div x-text="segmentCount + ' segments'"></div>
+            <div x-text="totalDuration + ' min'"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card View -->
+      <div x-show="viewMode==='card' && meeting.segments.length" id="segmentList">
+        <template x-for="(seg, idx) in meeting.segments" :key="seg.id">
+          <div class="segment-card bg-white rounded-lg p-3 mb-2 shadow-sm border-l-4 flex items-center gap-3"
+            :style="'border-left-color: ' + seg.color">
+            <div class="shrink-0 w-12 text-center">
+              <div class="text-xs text-gray-400" x-text="seg.startTime"></div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-medium text-gray-800 truncate" x-text="seg.type"></span>
+                <span x-show="seg.isOptional" class="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded">opt</span>
+              </div>
+              <div class="text-xs text-gray-500" x-text="seg.roleTaker || 'No role taker'"></div>
+            </div>
+            <div class="shrink-0 text-right">
+              <span class="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded" x-text="seg.duration + ' min'"></span>
+            </div>
+            <div class="shrink-0 text-gray-300 cursor-grab">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M7 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Timeline View -->
+      <div x-show="viewMode==='timeline' && meeting.segments.length" class="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <div class="relative" style="padding-top: 20px;">
+          <!-- Time axis -->
+          <div class="relative h-8 mb-1 border-b border-gray-200">
+            <template x-for="tick in timelineTicks" :key="tick.label">
+              <div class="absolute text-[10px] text-gray-400 -top-4" :style="'left:' + tick.pct + '%'">
+                <div class="w-px h-2 bg-gray-300 absolute top-3 left-1/2"></div>
+                <span x-text="tick.label"></span>
+              </div>
+            </template>
+          </div>
+          <!-- Timeline rows -->
+          <div class="space-y-1">
+            <template x-for="seg in meeting.segments" :key="seg.id">
+              <div class="relative h-8 group">
+                <div class="timeline-bar absolute rounded-sm h-6 top-1 flex items-center px-2 overflow-hidden"
+                  :style="'left:' + seg._timelinePct + '%; width:' + Math.max(seg._timelineWidth, 1) + '%; background-color:' + seg.color">
+                  <span class="text-[10px] text-white font-medium truncate drop-shadow" x-text="seg.type"></span>
+                </div>
+                <!-- Tooltip on hover -->
+                <div class="hidden group-hover:block absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-10"
+                  x-text="seg.type + ' | ' + seg.startTime + ' | ' + seg.duration + 'min | ' + (seg.roleTaker || 'N/A')"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer Status Bar -->
+  <footer class="bg-white border-t border-gray-200 px-4 py-1.5 flex items-center justify-between text-xs text-gray-400 shrink-0">
+    <span x-show="meeting.segments.length" x-text="'Total: ' + totalDuration + ' min | ' + segmentCount + ' segments'"></span>
+    <span x-show="!meeting.segments.length">Ready</span>
+    <span x-show="providers[activeProvider].apiKey" class="text-green-500" x-text="activeProvider + ' configured'"></span>
+    <span x-show="!providers[activeProvider].apiKey" class="text-yellow-600">API not configured</span>
+  </footer>
+
+<script>
+function meetingApp() {
+  const SEGMENT_DEFAULTS = [
+    { type: "Guests Registration", defaultDuration: 15, isOptional: false, color: "#3b82f6" },
+    { type: "Meeting Rules Introduction (SAA)", defaultDuration: 2, isOptional: false, color: "#10b981" },
+    { type: "Opening Remarks", defaultDuration: 2, isOptional: false, color: "#10b981" },
+    { type: "TOM Introduction", defaultDuration: 2, isOptional: false, color: "#6366f1" },
+    { type: "Timer", defaultDuration: 2, isOptional: false, color: "#8b5cf6" },
+    { type: "Grammarian", defaultDuration: 2, isOptional: true, color: "#8b5cf6" },
+    { type: "Hark Master", defaultDuration: 1, isOptional: true, color: "#8b5cf6" },
+    { type: "Aha Counter", defaultDuration: 1, isOptional: true, color: "#8b5cf6" },
+    { type: "Guests Self Introduction", defaultDuration: 5, isOptional: false, color: "#14b8a6" },
+    { type: "TTM Opening", defaultDuration: 2, isOptional: false, color: "#f59e0b" },
+    { type: "Table Topic Session", defaultDuration: 20, isOptional: false, color: "#f97316" },
+    { type: "Workshop", defaultDuration: 25, isOptional: true, color: "#ef4444" },
+    { type: "Prepared Speech", defaultDuration: 7, isOptional: true, color: "#ef4444" },
+    { type: "Tea Break & Group Photos", defaultDuration: 10, isOptional: false, color: "#94a3b8" },
+    { type: "Table Topic Evaluation", defaultDuration: 7, isOptional: false, color: "#eab308" },
+    { type: "Prepared Speech Evaluation", defaultDuration: 3, isOptional: true, color: "#eab308" },
+    { type: "Grammarian Report", defaultDuration: 2, isOptional: true, color: "#8b5cf6" },
+    { type: "Aha Counter Report", defaultDuration: 2, isOptional: true, color: "#8b5cf6" },
+    { type: "Timer Report", defaultDuration: 2, isOptional: false, color: "#8b5cf6" },
+    { type: "Hark Master Pop Quiz", defaultDuration: 5, isOptional: true, color: "#8b5cf6" },
+    { type: "General Evaluation", defaultDuration: 8, isOptional: false, color: "#ec4899" },
+    { type: "Voting Section", defaultDuration: 2, isOptional: false, color: "#6366f1" },
+    { type: "Moment of Truth", defaultDuration: 7, isOptional: false, color: "#ec4899" },
+    { type: "Awards", defaultDuration: 2, isOptional: false, color: "#f43f5e" },
+    { type: "Closing Remarks", defaultDuration: 1, isOptional: false, color: "#10b981" }
+  ];
+
+  // CLUB_MEMBERS, prompts are defined in prompts.js
+
+  return {
+    meeting: {
+      meta: { no: null, type: "Regular", theme: "", manager: "", date: "", startTime: "19:15", endTime: "21:30", location: "", introduction: "" },
+      segments: []
+    },
+    messages: [],
+    chatInput: "",
+    loading: false,
+    streamingMsg: null,
+    inputHeight: 180,
+    resizing: false,
+    viewMode: "card",
+    showSettings: false,
+    testing: false,
+    testingProvider: null,
+    testResults: {},
+    settingsMsg: "",
+    settingsError: false,
+    sortableInstance: null,
+    abortController: null,
+    activeProvider: localStorage.getItem("mf_activeProvider") || "deepseek",
+    providers: {
+      deepseek: {
+        apiKey: "",
+        baseUrl: localStorage.getItem("mf_ds_baseUrl") || "https://api.deepseek.com",
+        model: localStorage.getItem("mf_ds_model") || "model1",
+        presetModels: ["model1"]
+      },
+      openai: {
+        apiKey: "",
+        baseUrl: localStorage.getItem("mf_oai_baseUrl") || "https://api.openai.com",
+        model: localStorage.getItem("mf_oai_model") || "gpt-5.4-nano",
+        presetModels: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "o3", "o3-mini", "o4-mini"]
+      },
+      anthropic: {
+        apiKey: "",
+        baseUrl: localStorage.getItem("mf_anth_baseUrl") || "https://api.anthropic.com",
+        model: localStorage.getItem("mf_anth_model") || "claude-haiku-4-5",
+        presetModels: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
+      },
+      gemini: {
+        apiKey: "",
+        baseUrl: localStorage.getItem("mf_gem_baseUrl") || "https://generativelanguage.googleapis.com/v1beta",
+        model: localStorage.getItem("mf_gem_model") || "gemini-2.5-flash-lite",
+        presetModels: ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash-lite", "gemini-3-deep-think"]
+      }
+    },
+
+    init() {
+      // Load API keys from localStorage
+      ["deepseek","openai","anthropic","gemini"].forEach(p => {
+        const key = localStorage.getItem("mf_"+p+"_key");
+        if (key) this.providers[p].apiKey = key;
+      });
+      this.$watch("meeting.segments", () => {
+        this.$nextTick(() => this.initSortable());
+        this.updateTimelinePositions();
+      });
+      this.$watch("viewMode", () => {
+        if (this.viewMode === "timeline") this.$nextTick(() => this.updateTimelinePositions());
+      });
+    },
+
+    get segmentCount() { return this.meeting.segments.length; },
+    get totalDuration() {
+      if (!this.meeting.segments.length) return 0;
+      const last = this.meeting.segments[this.meeting.segments.length - 1];
+      const [sh, sm] = (this.meeting.meta.startTime || "19:15").split(":").map(Number);
+      const [eh, em] = (last.startTime || "19:15").split(":").map(Number);
+      return (eh * 60 + em + last.duration) - (sh * 60 + sm);
+    },
+    get timelineTicks() {
+      if (!this.meeting.segments.length) return [];
+      const startSeg = this.meeting.segments[0];
+      const lastSeg = this.meeting.segments[this.meeting.segments.length - 1];
+      const [sh, sm] = startSeg.startTime.split(":").map(Number);
+      const [eh, em] = lastSeg.startTime.split(":").map(Number);
+      const startMin = sh * 60 + sm;
+      const endMin = eh * 60 + em + lastSeg.duration;
+      const total = endMin - startMin;
+      const ticks = [];
+      const step = total > 120 ? 30 : 15;
+      for (let m = 0; m <= total; m += step) {
+        const absMin = startMin + m;
+        const h = Math.floor(absMin / 60);
+        const min = absMin % 60;
+        ticks.push({ label: h + ":" + String(min).padStart(2, "0"), pct: (m / total) * 100 });
+      }
+      return ticks;
+    },
+
+    updateTimelinePositions() {
+      if (!this.meeting.segments.length) return;
+      const startSeg = this.meeting.segments[0];
+      const lastSeg = this.meeting.segments[this.meeting.segments.length - 1];
+      const [sh, sm] = startSeg.startTime.split(":").map(Number);
+      const [eh, em] = lastSeg.startTime.split(":").map(Number);
+      const startMin = sh * 60 + sm;
+      const endMin = eh * 60 + em + lastSeg.duration;
+      const total = endMin - startMin;
+      this.meeting.segments.forEach(seg => {
+        const [h, m] = seg.startTime.split(":").map(Number);
+        const segStart = h * 60 + m;
+        seg._timelinePct = ((segStart - startMin) / total) * 100;
+        seg._timelineWidth = (seg.duration / total) * 100;
+      });
+    },
+
+    initSortable() {
+      const el = document.getElementById("segmentList");
+      if (!el) return;
+      if (this.sortableInstance) this.sortableInstance.destroy();
+      this.sortableInstance = Sortable.create(el, {
+        animation: 200,
+        handle: ".segment-card",
+        ghostClass: "sortable-ghost",
+        chosenClass: "sortable-chosen",
+        onEnd: (evt) => {
+          const moved = this.meeting.segments.splice(evt.oldIndex, 1)[0];
+          this.meeting.segments.splice(evt.newIndex, 0, moved);
+          this.recalculateTimes();
+        }
+      });
+    },
+
+    recalculateTimes() {
+      if (!this.meeting.segments.length) return;
+      let [h, m] = (this.meeting.meta.startTime || "19:15").split(":").map(Number);
+      this.meeting.segments.forEach((seg, i) => {
+        seg.startTime = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+        m += seg.duration;
+        if (i < this.meeting.segments.length - 1) m += 1; // 1-min buffer
+        while (m >= 60) { h++; m -= 60; }
+      });
+      const last = this.meeting.segments[this.meeting.segments.length - 1];
+      const [lh, lm] = last.startTime.split(":").map(Number);
+      let endMin = lh * 60 + lm + last.duration;
+      this.meeting.meta.endTime = String(Math.floor(endMin / 60)).padStart(2, "0") + ":" + String(endMin % 60).padStart(2, "0");
+      this.updateTimelinePositions();
+    },
+
+    async sendMessage() {
+      const text = this.chatInput.trim();
+      if (!text || this.loading) return;
+      this.chatInput = "";
+
+      const isInitialParse = !this.meeting.segments.length;
+      this.messages.push({ id: Date.now(), role: "user", content: text });
+
+      const providerCfg = this.providers[this.activeProvider];
+      if (!providerCfg || !providerCfg.apiKey) {
+        this.messages.push({ id: Date.now() + 1, role: "assistant", content: "Please configure your API key in Settings first. Or click 'Load Demo' to see an example." });
+        this.scrollChat();
+        return;
+      }
+
+      // Create a streaming assistant message placeholder
+      const msgId = Date.now() + 1;
+      this.streamingMsg = { id: msgId, role: "assistant", content: "", thinking: "", showThinking: true, streaming: true, isJson: true };
+      this.messages.push(this.streamingMsg);
+      this.loading = true;
+      this.scrollChat();
+
+      // Abort previous request if any
+      if (this.abortController) this.abortController.abort();
+      this.abortController = new AbortController();
+
+      try {
+        let fullResponse = "";
+
+        const onThinking = (chunk) => {
+          this.streamingMsg.thinking += chunk;
+          this.scrollChat();
+        };
+        const onContent = (chunk) => {
+          this.streamingMsg.content += chunk;
+          this.scrollChat();
+        };
+
+        if (isInitialParse) {
+          const userMsg = PLAN_MEETING_USER_PROMPT.replace("{text}", text);
+          fullResponse = await this.callLLMStreaming(PLAN_MEETING_DEVELOPER_PROMPT, userMsg, onThinking, onContent, this.abortController.signal);
+        } else {
+          const currentJSON = JSON.stringify({ meta: this.meeting.meta, segments: this.meeting.segments.map(s => ({ type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker })) }, null, 2);
+          const userMsg = ADJUST_MEETING_USER_PROMPT.replace("{text}", text);
+          fullResponse = await this.callLLMStreaming(ADJUST_MEETING_DEVELOPER_PROMPT + currentJSON, userMsg, onThinking, onContent, this.abortController.signal);
+        }
+
+        this.streamingMsg.streaming = false;
+
+        const parsed = this.parseJSON(fullResponse);
+        if (parsed) {
+          if (parsed.meta) {
+            // Normalize snake_case → camelCase
+            const m = parsed.meta;
+            this.meeting.meta = {
+              ...this.meeting.meta,
+              no: m.no ?? this.meeting.meta.no,
+              type: m.type ?? this.meeting.meta.type,
+              theme: m.theme ?? this.meeting.meta.theme,
+              manager: m.manager ?? this.meeting.meta.manager,
+              date: m.date ?? this.meeting.meta.date,
+              startTime: m.startTime || m.start_time || this.meeting.meta.startTime,
+              endTime: m.endTime || m.end_time || this.meeting.meta.endTime,
+              location: m.location ?? this.meeting.meta.location,
+              introduction: m.introduction ?? this.meeting.meta.introduction
+            };
+          }
+          if (parsed.segments) {
+            this.meeting.segments = parsed.segments.map((s, i) => this.enrichSegment(s, i));
+            this.recalculateTimes();
+          }
+          this.streamingMsg.segments = this.meeting.segments.length;
+          this.streamingMsg.content = JSON.stringify(parsed, null, 2);
+        } else if (!this.streamingMsg.content) {
+          this.streamingMsg.content = "Sorry, couldn't parse the response.";
+          this.streamingMsg.error = "Raw: " + fullResponse.substring(0, 200);
+        }
+      } catch (e) {
+        this.streamingMsg.streaming = false;
+        if (e.name === "AbortError") {
+          this.streamingMsg.content = this.streamingMsg.content || "[Request cancelled]";
+        } else {
+          this.streamingMsg.content = this.streamingMsg.content || "Error occurred.";
+          this.streamingMsg.error = e.message;
+        }
+      }
+      this.loading = false;
+      this.abortController = null;
+      this.scrollChat();
+    },
+
+    enrichSegment(s, idx) {
+      const segType = s.type || "";
+      const def = SEGMENT_DEFAULTS.find(d => segType.includes(d.type) || d.type.includes(segType)) || {};
+      return {
+        id: "seg_" + String(idx).padStart(3, "0") + "_" + Date.now(),
+        type: segType,
+        startTime: s.startTime || s.start_time || "",
+        duration: parseInt(s.duration) || def.defaultDuration || 5,
+        roleTaker: s.roleTaker || s.role_taker || "",
+        isOptional: def.isOptional || false,
+        color: def.color || "#94a3b8"
+      };
+    },
+
+    isReasoningModel(model) {
+      return /^o[1-9]/.test(model);
+    },
+
+    syncSelect(el, cfg) {
+      // Force browser <select> to display the correct option when provider changes
+      const target = cfg.model;
+      if (el.value !== target) el.value = target;
+    },
+
+    parseJSON(text) {
+      let cleaned = text.replace(/```json\s?/gi, "").replace(/```\s?/g, "").trim();
+      try { return JSON.parse(cleaned); } catch (e) {}
+      const match = cleaned.match(/\{[\s\S]*\}/);
+      if (match) {
+        try { return JSON.parse(match[0]); } catch (e) {}
+      }
+      return null;
+    },
+
+    async callLLMStreaming(systemPrompt, userMessage, onThinking, onContent, signal) {
+      if (this.activeProvider === "anthropic") {
+        return this.callAnthropicStreaming(systemPrompt, userMessage, onThinking, onContent, signal);
+      }
+      if (this.activeProvider === "gemini") {
+        return this.callGeminiStreaming(systemPrompt, userMessage, onThinking, onContent, signal);
+      }
+      return this.callOpenAIStreaming(systemPrompt, userMessage, onThinking, onContent, signal);
+    },
+
+    async callOpenAIStreaming(systemPrompt, userMessage, onThinking, onContent, signal) {
+      const cfg = this.providers[this.activeProvider];
+      const messages = [{ role: "system", content: systemPrompt }];
+      messages.push({ role: "user", content: userMessage || "Please generate the output." });
+
+      const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.apiKey },
+        body: JSON.stringify({ model: cfg.model, messages, ...(this.isReasoningModel(cfg.model) ? {} : { temperature: 0.3 }), max_completion_tokens: 4096, stream: true }),
+        signal
+      });
+      if (!res.ok) throw new Error("API error: " + res.status + " " + (await res.text()).substring(0, 200));
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          const data = trimmed.slice(6);
+          if (data === "[DONE]") continue;
+          try {
+            const json = JSON.parse(data);
+            const delta = json.choices?.[0]?.delta;
+            if (!delta) { console.debug("[SSE OpenAI] no delta", json); continue; }
+            // Thinking/reasoning content (DeepSeek, o1, etc.)
+            if (delta.reasoning_content) {
+              console.debug("[SSE OpenAI] thinking:", delta.reasoning_content.substring(0, 80));
+              onThinking(delta.reasoning_content);
+            }
+            // Some providers use 'reasoning' field
+            if (delta.reasoning) {
+              console.debug("[SSE OpenAI] reasoning:", delta.reasoning.substring(0, 80));
+              onThinking(delta.reasoning);
+            }
+            // Regular content
+            if (delta.content) {
+              fullContent += delta.content;
+              onContent(delta.content);
+            }
+            // Log if delta has unknown keys
+            const known = ["role", "content", "reasoning_content", "reasoning", "tool_calls", "function_call"];
+            const unknown = Object.keys(delta).filter(k => !known.includes(k));
+            if (unknown.length) console.debug("[SSE OpenAI] unknown delta keys:", unknown, delta);
+          } catch (e) { /* skip malformed chunks */ }
+        }
+      }
+      return fullContent;
+    },
+
+    async callAnthropicStreaming(systemPrompt, userMessage, onThinking, onContent, signal) {
+      const cfg = this.providers[this.activeProvider];
+      const msgs = [];
+      if (userMessage) {
+        msgs.push({ role: "user", content: userMessage });
+      } else {
+        msgs.push({ role: "user", content: "Please process the request." });
+      }
+
+      const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: cfg.model, system: systemPrompt, messages: msgs, temperature: 0.3, max_tokens: 4096, stream: true }),
+        signal
+      });
+      if (!res.ok) throw new Error("API error: " + res.status + " " + (await res.text()).substring(0, 200));
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (!trimmed.startsWith("data: ")) continue;
+          const data = trimmed.slice(6);
+          try {
+            const json = JSON.parse(data);
+            if (json.type === "content_block_start" && json.content_block?.type === "thinking") {
+              if (json.content_block.thinking) onThinking(json.content_block.thinking);
+            }
+            if (json.type === "content_block_delta") {
+              if (json.delta?.type === "thinking_delta" && json.delta.thinking) {
+                onThinking(json.delta.thinking);
+              }
+              if (json.delta?.type === "text_delta" && json.delta.text) {
+                fullContent += json.delta.text;
+                onContent(json.delta.text);
+              }
+            }
+          } catch (e) { /* skip malformed chunks */ }
+        }
+      }
+      return fullContent;
+    },
+
+    async callGeminiStreaming(systemPrompt, userMessage, onThinking, onContent, signal) {
+      const cfg = this.providers.gemini;
+      const contents = [];
+      if (userMessage) {
+        contents.push({ role: "user", parts: [{ text: userMessage }] });
+      } else {
+        contents.push({ role: "user", parts: [{ text: "Please process the request." }] });
+      }
+
+      const body = {
+        system_instruction: { parts: { text: systemPrompt } },
+        contents,
+        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
+      };
+
+      const url = cfg.baseUrl.replace(/\/$/, "") + "/models/" + cfg.model + ":streamGenerateContent?alt=sse&key=" + encodeURIComponent(cfg.apiKey);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal
+      });
+      if (!res.ok) throw new Error("Gemini API error: " + res.status + " " + (await res.text()).substring(0, 200));
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          const data = trimmed.slice(6);
+          try {
+            const json = JSON.parse(data);
+            const parts = json.candidates?.[0]?.content?.parts;
+            if (!parts) continue;
+            for (const part of parts) {
+              if (part.thought && part.text) {
+                onThinking(part.text);
+              } else if (part.text && !part.thought) {
+                fullContent += part.text;
+                onContent(part.text);
+              }
+            }
+          } catch (e) { /* skip malformed chunks */ }
+        }
+      }
+      return fullContent;
+    },
+
+    async callGemini(systemPrompt, userMessage) {
+      const cfg = this.providers.gemini;
+      const contents = [];
+      if (userMessage) {
+        contents.push({ role: "user", parts: [{ text: userMessage }] });
+      } else {
+        contents.push({ role: "user", parts: [{ text: "Please process the request." }] });
+      }
+
+      const body = {
+        system_instruction: { parts: { text: systemPrompt } },
+        contents,
+        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
+      };
+
+      const url = cfg.baseUrl.replace(/\/$/, "") + "/models/" + cfg.model + ":generateContent?key=" + encodeURIComponent(cfg.apiKey);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error("Gemini API error: " + res.status + " " + (await res.text()).substring(0, 200));
+      const data = await res.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    },
+
+    async callLLM(systemPrompt, userMessage, isParse) {
+      if (this.activeProvider === "anthropic") {
+        return this.callAnthropic(systemPrompt, userMessage, isParse);
+      }
+      if (this.activeProvider === "gemini") {
+        return this.callGemini(systemPrompt, userMessage);
+      }
+      return this.callOpenAI(systemPrompt, userMessage);
+    },
+
+    async callOpenAI(systemPrompt, userMessage) {
+      const cfg = this.providers[this.activeProvider];
+      const messages = [{ role: "system", content: systemPrompt }];
+      if (userMessage) messages.push({ role: "user", content: userMessage });
+
+      const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.apiKey },
+        body: JSON.stringify({ model: cfg.model, messages, ...(this.isReasoningModel(cfg.model) ? {} : { temperature: 0.3 }), max_completion_tokens: 4096 })
+      });
+      if (!res.ok) throw new Error("API error: " + res.status + " " + (await res.text()).substring(0, 200));
+      const data = await res.json();
+      return data.choices[0].message.content;
+    },
+
+    async callAnthropic(systemPrompt, userMessage, isParse) {
+      const cfg = this.providers[this.activeProvider];
+      const messages = [];
+      if (userMessage) messages.push({ role: "user", content: userMessage });
+      else messages.push({ role: "user", content: "Please process the request." });
+
+      const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: cfg.model, system: systemPrompt, messages, temperature: 0.3, max_tokens: 4096 })
+      });
+      if (!res.ok) throw new Error("API error: " + res.status + " " + (await res.text()).substring(0, 200));
+      const data = await res.json();
+      return data.content[0].text;
+    },
+
+    scrollChat() {
+      this.$nextTick(() => {
+        const el = this.$refs.chatContainer;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    stopGeneration() {
+      if (this.abortController) {
+        this.abortController.abort();
+        this.abortController = null;
+      }
+      this.loading = false;
+    },
+
+    highlightJson(content) {
+      if (!content) return "";
+      // Try to prettify if valid JSON
+      let display = content;
+      try {
+        display = JSON.stringify(JSON.parse(content), null, 2);
+      } catch (e) {
+        // Invalid/incomplete JSON — still try to make it readable
+        try {
+          // Try to complete common truncations
+          let fixed = content;
+          // Close unclosed strings
+          const quoteCount = (fixed.match(/(?<!\\)"/g) || []).length;
+          if (quoteCount % 2 !== 0) fixed += '"';
+          // Close unclosed brackets
+          const opens = (fixed.match(/[{\[]/g) || []).length;
+          const closes = (fixed.match(/[}\]]/g) || []).length;
+          for (let i = 0; i < opens - closes; i++) {
+            fixed += fixed.includes('{') && opens - closes > 1 ? '}' : '';
+          }
+          display = JSON.stringify(JSON.parse(fixed), null, 2);
+        } catch (e2) {
+          // Can't fix — highlight raw content
+        }
+      }
+      // Syntax highlight with highlight.js
+      try {
+        const result = hljs.highlight(display, { language: "json" });
+        return result.value;
+      } catch (e) {
+        return display.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+    },
+
+    handleEnter(e) {
+      if (e.shiftKey) {
+        // Shift+Enter: insert newline
+        const ta = e.target;
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        this.chatInput = this.chatInput.substring(0, start) + "\n" + this.chatInput.substring(end);
+        this.$nextTick(() => { ta.selectionStart = ta.selectionEnd = start + 1; });
+      } else {
+        this.sendMessage();
+      }
+    },
+
+    startResize(e) {
+      this.resizing = true;
+      document.body.classList.add("resizing");
+      const startY = e.clientY;
+      const startH = this.inputHeight;
+      const onMove = (ev) => {
+        const newH = startH + (startY - ev.clientY);
+        this.inputHeight = Math.max(100, Math.min(500, newH));
+      };
+      const onUp = () => {
+        this.resizing = false;
+        document.body.classList.remove("resizing");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+
+    saveSettings() {
+      const prefix = { deepseek: "mf_ds", openai: "mf_oai", anthropic: "mf_anth", gemini: "mf_gem" };
+      Object.entries(this.providers).forEach(([name, cfg]) => {
+        const p = prefix[name];
+        localStorage.setItem(p + "_baseUrl", cfg.baseUrl);
+        localStorage.setItem(p + "_model", cfg.model);
+        if (cfg.apiKey) localStorage.setItem("mf_" + name + "_key", cfg.apiKey);
+      });
+      localStorage.setItem("mf_activeProvider", this.activeProvider);
+      this.settingsMsg = "Settings saved!";
+      this.settingsError = false;
+      setTimeout(() => { this.settingsMsg = ""; this.showSettings = false; }, 1000);
+    },
+
+    async testConnection(providerName) {
+      this.testing = true;
+      this.testingProvider = providerName;
+      const prevActive = this.activeProvider;
+      try {
+        this.activeProvider = providerName;
+        if (providerName === "anthropic") {
+          await this.callAnthropic("Reply with just 'OK'.", "test", false);
+        } else if (providerName === "gemini") {
+          await this.callGemini("Reply with just 'OK'.", "test");
+        } else {
+          await this.callOpenAI("Reply with just 'OK'.", "test");
+        }
+        this.testResults[providerName] = "ok";
+        this.persistProvider(providerName);
+      } catch (e) {
+        this.testResults[providerName] = "fail";
+        console.error(providerName + " test failed:", e);
+      }
+      this.activeProvider = prevActive;
+      this.testing = false;
+      this.testingProvider = null;
+    },
+
+    persistProvider(name) {
+      const prefix = { deepseek: "mf_ds", openai: "mf_oai", anthropic: "mf_anth", gemini: "mf_gem" };
+      const p = prefix[name];
+      const cfg = this.providers[name];
+      localStorage.setItem(p + "_baseUrl", cfg.baseUrl);
+      localStorage.setItem(p + "_model", cfg.model);
+      if (cfg.apiKey) localStorage.setItem("mf_" + name + "_key", cfg.apiKey);
+    },
+
+    exportJSON() {
+      const data = {
+        meta: this.meeting.meta,
+        segments: this.meeting.segments.map(s => ({ type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker }))
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "meeting_" + (this.meeting.meta.no || "agenda") + ".json";
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    exportImage() {
+      const el = this.$refs.vizPanel;
+      html2canvas(el, { scale: 2, backgroundColor: "#f9fafb" }).then(canvas => {
+        const link = document.createElement("a");
+        link.download = "meeting_" + (this.meeting.meta.no || "agenda") + ".png";
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      });
+    },
+
+    loadDemo() {
+      this.meeting = {
+        meta: {
+          no: 387,
+          type: "Regular",
+          theme: "Aging: It's an adventure",
+          manager: "Rui Zheng",
+          date: "2024-11-06",
+          startTime: "19:15",
+          endTime: "21:30",
+          location: "JOININ HUB, 6th Xin'an Rd, Bao'an",
+          introduction: "Imagine a world where half the women you meet are over 50..."
+        },
+        segments: [
+          { id: "s1", type: "Guests Registration", startTime: "19:15", duration: 15, roleTaker: "All", isOptional: false, color: "#3b82f6" },
+          { id: "s2", type: "Meeting Rules Introduction (SAA)", startTime: "19:30", duration: 3, roleTaker: "Joyce Feng", isOptional: false, color: "#10b981" },
+          { id: "s3", type: "Opening Remarks", startTime: "19:33", duration: 2, roleTaker: "Libra Lee", isOptional: false, color: "#10b981" },
+          { id: "s4", type: "TOM Introduction", startTime: "19:35", duration: 2, roleTaker: "Rui Zheng", isOptional: false, color: "#6366f1" },
+          { id: "s5", type: "Timer", startTime: "19:37", duration: 3, roleTaker: "Max Long", isOptional: false, color: "#8b5cf6" },
+          { id: "s6", type: "Hark Master", startTime: "19:40", duration: 3, roleTaker: "Mia", isOptional: true, color: "#8b5cf6" },
+          { id: "s7", type: "Guests Self Introduction", startTime: "19:43", duration: 8, roleTaker: "Joseph Zhang", isOptional: false, color: "#14b8a6" },
+          { id: "s8", type: "TTM Opening", startTime: "19:52", duration: 4, roleTaker: "Rui Zheng", isOptional: false, color: "#f59e0b" },
+          { id: "s9", type: "Table Topic Session", startTime: "19:56", duration: 16, roleTaker: "All", isOptional: false, color: "#f97316" },
+          { id: "s10", type: "Prepared Speech", startTime: "20:13", duration: 7, roleTaker: "Frank Zeng", isOptional: true, color: "#ef4444" },
+          { id: "s11", type: "Prepared Speech", startTime: "20:21", duration: 7, roleTaker: "Libra Lee", isOptional: true, color: "#ef4444" },
+          { id: "s12", type: "Tea Break & Group Photos", startTime: "20:29", duration: 12, roleTaker: "All", isOptional: false, color: "#94a3b8" },
+          { id: "s13", type: "Table Topic Evaluation", startTime: "20:42", duration: 7, roleTaker: "Emily", isOptional: false, color: "#eab308" },
+          { id: "s14", type: "Prepared Speech Evaluation", startTime: "20:50", duration: 3, roleTaker: "Phyllis", isOptional: true, color: "#eab308" },
+          { id: "s15", type: "Prepared Speech Evaluation", startTime: "20:54", duration: 3, roleTaker: "Amanda", isOptional: true, color: "#eab308" },
+          { id: "s16", type: "Timer Report", startTime: "20:58", duration: 2, roleTaker: "Max Long", isOptional: false, color: "#8b5cf6" },
+          { id: "s17", type: "Hark Master Pop Quiz", startTime: "21:01", duration: 5, roleTaker: "Mia", isOptional: true, color: "#8b5cf6" },
+          { id: "s18", type: "General Evaluation", startTime: "21:07", duration: 4, roleTaker: "Karman", isOptional: false, color: "#ec4899" },
+          { id: "s19", type: "Voting Section", startTime: "21:16", duration: 2, roleTaker: "Rui Zheng", isOptional: false, color: "#6366f1" },
+          { id: "s20", type: "Moment of Truth", startTime: "21:19", duration: 7, roleTaker: "Leta Li", isOptional: false, color: "#ec4899" },
+          { id: "s21", type: "Awards", startTime: "21:27", duration: 3, roleTaker: "Libra Lee", isOptional: false, color: "#f43f5e" },
+          { id: "s22", type: "Closing Remarks", startTime: "21:30", duration: 1, roleTaker: "Libra Lee", isOptional: false, color: "#10b981" }
+        ]
+      };
+      this.updateTimelinePositions();
+      this.messages.push({ id: Date.now(), role: "info", content: "Demo data loaded. Try chatting to adjust!" });
+    }
+  };
+}
+</script>
+</body>
+</html>
