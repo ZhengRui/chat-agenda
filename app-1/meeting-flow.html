@@ -22,8 +22,8 @@
   [x-cloak] { display: none !important; }
   .segment-card { cursor: grab; transition: all 0.15s ease; }
   .segment-card:active { cursor: grabbing; }
-  .segment-card.sortable-chosen { opacity: 0.5; transform: scale(0.98); }
-  .segment-card.sortable-ghost { opacity: 0.3; border: 2px dashed #94a3b8; }
+  .segment-card.sortable-chosen { opacity: 1; }
+  .segment-card.sortable-ghost { opacity: 0.2; outline: 2px dashed #94a3b8; outline-offset: -2px; background: #f1f5f9; }
   .chat-message { animation: fadeIn 0.2s ease; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   .resize-handle { height: 6px; cursor: row-resize; background: transparent; position: relative; flex-shrink: 0; z-index: 10; }
@@ -42,6 +42,8 @@
   .thinking-content { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; max-height: 320px; overflow-y: auto; }
   .streaming-cursor::after { content: '|'; animation: blink 0.6s step-end infinite; color: #3b82f6; }
   @keyframes blink { 50% { opacity: 0; } }
+  .drop-line { position: absolute; left: 6px; right: 6px; height: 2px; background: #3b82f6; border-radius: 1px; box-shadow: 0 0 6px rgba(59,130,246,0.55); pointer-events: none; z-index: 10; margin-top: -1px; }
+  #segmentList { position: relative; }
   .markdown-body { line-height: 1.55; word-break: break-word; }
   .markdown-body > *:first-child { margin-top: 0; }
   .markdown-body > *:last-child { margin-bottom: 0; }
@@ -313,24 +315,44 @@
 
       <!-- Card View -->
       <div x-show="viewMode==='card' && meeting.segments.length" id="segmentList">
-        <template x-for="(seg, idx) in meeting.segments" :key="seg.id">
-          <div class="segment-card bg-white rounded-lg p-3 mb-2 shadow-sm border-l-4 flex items-center gap-3"
-            :style="'border-left-color: ' + seg.color">
-            <div class="shrink-0 w-12 text-center">
-              <div class="text-xs text-gray-400" x-text="seg.startTime"></div>
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-medium text-gray-800 truncate" x-text="seg.type"></span>
+        <template x-for="item in timelineItems" :key="item.key">
+          <div
+            :data-kind="item.kind"
+            :data-seg-idx="item.segIdx"
+            :data-seg-id="item.kind === 'card' ? item.seg.id : null"
+            :class="item.kind === 'card'
+              ? 'segment-card rounded-lg p-3 my-1 shadow-sm border-l-4 flex items-center gap-3 transition ' + (item.seg.bufferBefore < 0 ? 'bg-red-50 ring-1 ring-red-300' : 'bg-white')
+              : 'segment-buffer select-none'"
+            :style="item.kind === 'card' ? ('border-left-color: ' + (item.seg.bufferBefore < 0 ? '#ef4444' : item.seg.color)) : ''"
+            :title="item.kind === 'card' && item.seg.bufferBefore < 0 ? 'Overlaps previous segment by ' + Math.abs(item.seg.bufferBefore) + ' min' : ''">
+            <!-- Buffer visual: compact horizontal divider with a pill in the middle. -->
+            <template x-if="item.kind === 'buffer'">
+              <div class="flex items-center gap-2 px-3">
+                <div class="flex-1 h-px bg-slate-200"></div>
+                <div class="text-[10px] font-medium text-slate-500 px-2 py-0.5 rounded-full bg-slate-50 leading-none" x-text="item.minutes + ' min'"></div>
+                <div class="flex-1 h-px bg-slate-200"></div>
               </div>
-              <div class="text-xs text-gray-500" x-text="seg.roleTaker || 'No role taker'"></div>
-            </div>
-            <div class="shrink-0 text-right">
-              <span class="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded" x-text="seg.duration + ' min'"></span>
-            </div>
-            <div class="shrink-0 text-gray-300 cursor-grab">
-              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M7 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
-            </div>
+            </template>
+            <!-- Card visual: time | type+role | duration | drag handle. -->
+            <template x-if="item.kind === 'card'">
+              <div class="flex items-center gap-3 w-full">
+                <div class="shrink-0 w-12 text-center">
+                  <div class="text-xs text-gray-400" x-text="item.seg.startTime"></div>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium text-gray-800 truncate" x-text="item.seg.type"></span>
+                  </div>
+                  <div class="text-xs text-gray-500" x-text="item.seg.roleTaker || 'No role taker'"></div>
+                </div>
+                <div class="shrink-0 text-right">
+                  <span class="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded" x-text="item.seg.duration + ' min'"></span>
+                </div>
+                <div class="shrink-0 text-gray-300 cursor-grab">
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M7 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
+                </div>
+              </div>
+            </template>
           </div>
         </template>
       </div>
@@ -485,6 +507,19 @@ function meetingApp() {
       const [eh, em] = (last.startTime || "19:15").split(":").map(Number);
       return (eh * 60 + em + last.duration) - (sh * 60 + sm);
     },
+    get timelineItems() {
+      // Flat list of card+buffer items rendered in order as segmentList children.
+      // A buffer item appears between consecutive cards when bufferBefore > 0.
+      // Overlaps (bufferBefore < 0) are shown as conflict styling on the card, not as a buffer item.
+      const items = [];
+      this.meeting.segments.forEach((seg, idx) => {
+        if (idx > 0 && seg.bufferBefore > 0) {
+          items.push({ kind: "buffer", segIdx: idx, minutes: seg.bufferBefore, key: "buf-" + seg.id });
+        }
+        items.push({ kind: "card", segIdx: idx, seg, key: seg.id });
+      });
+      return items;
+    },
     get timelineTicks() {
       if (!this.meeting.segments.length) return [];
       const startSeg = this.meeting.segments[0];
@@ -526,33 +561,211 @@ function meetingApp() {
       const el = document.getElementById("segmentList");
       if (!el) return;
       if (this.sortableInstance) this.sortableInstance.destroy();
+      // Customize HTML5 drag image: clone the card, strip Alpine directives so appending to
+      // <body> doesn't trigger "item is not defined" errors (the clone is outside the x-for
+      // scope), style it semi-transparent so the user can see cards underneath.
+      if (!this._dragStartHandler) {
+        this._dragStartHandler = (e) => {
+          const card = e.target && e.target.closest && e.target.closest(".segment-card");
+          if (!card || !el.contains(card) || !e.dataTransfer) return;
+          const clone = card.cloneNode(true);
+          const stripAlpine = (node) => {
+            if (node.nodeType !== 1) return;
+            for (const attr of Array.from(node.attributes)) {
+              const n = attr.name;
+              if (n.startsWith("x-") || n.startsWith(":") || n.startsWith("@")) node.removeAttribute(n);
+            }
+            for (const child of Array.from(node.children)) stripAlpine(child);
+          };
+          stripAlpine(clone);
+          Object.assign(clone.style, {
+            position: "absolute", top: "-9999px", left: "-9999px",
+            width: card.offsetWidth + "px",
+            opacity: "0.75", background: "#ffffff",
+            boxShadow: "0 8px 20px rgba(0,0,0,0.2)",
+            borderRadius: "8px", pointerEvents: "none"
+          });
+          document.body.appendChild(clone);
+          const rect = card.getBoundingClientRect();
+          e.dataTransfer.setDragImage(clone, e.clientX - rect.left, e.clientY - rect.top);
+          setTimeout(() => clone.remove(), 0);
+        };
+        el.addEventListener("dragstart", this._dragStartHandler, true);
+      }
       this.sortableInstance = Sortable.create(el, {
-        animation: 200,
-        handle: ".segment-card",
+        animation: 0,                           // no anim needed; DOM doesn't reorder during drag.
+        draggable: ".segment-card",             // only cards are sortable items; buffers are static siblings.
         ghostClass: "sortable-ghost",
         chosenClass: "sortable-chosen",
+        onStart: (evt) => {
+          // Freeze the layout: snapshot children once; onMove below cancels all reorders.
+          this._dragChildren = Array.from(el.children).filter(c => c !== this._dropLine);
+          this._dropZone = null;
+          if (!this._dropLine) {
+            this._dropLine = document.createElement("div");
+            this._dropLine.className = "drop-line";
+          }
+        },
+        onMove: (evt) => {
+          const mouseY = evt.originalEvent && evt.originalEvent.clientY;
+          const children = this._dragChildren;
+          if (mouseY == null || !children || !children.length) return false;
+
+          // Zone k = "insert before children[k]"; zone = children.length = "after last".
+          // Pick the first child whose vertical midpoint is below the mouse.
+          let zone = children.length;
+          for (let i = 0; i < children.length; i++) {
+            const rect = children[i].getBoundingClientRect();
+            if (mouseY < rect.top + rect.height / 2) { zone = i; break; }
+          }
+          this._dropZone = { zone };
+
+          // Draw drop-line at the top of children[zone] (or below the last element).
+          if (!this._dropLine.parentElement) el.appendChild(this._dropLine);
+          let topPx;
+          if (zone >= children.length) {
+            const last = children[children.length - 1];
+            topPx = last ? last.offsetTop + last.offsetHeight : 0;
+          } else if (zone === 0) {
+            topPx = children[0].offsetTop - 2;
+          } else {
+            topPx = children[zone].offsetTop;
+          }
+          this._dropLine.style.top = topPx + "px";
+
+          return false;                         // cancel Sortable's live DOM reorder.
+        },
         onEnd: (evt) => {
-          const moved = this.meeting.segments.splice(evt.oldIndex, 1)[0];
-          this.meeting.segments.splice(evt.newIndex, 0, moved);
-          this.recalculateTimes();
+          if (this._dropLine && this._dropLine.parentElement) this._dropLine.remove();
+
+          const children = this._dragChildren;
+          const dropZone = this._dropZone;
+          this._dragChildren = null;
+          this._dropZone = null;
+          if (!children || !dropZone) return;
+          const { zone } = dropZone;
+
+          // Because onMove always returned false, evt.item is still in its original DOM slot.
+          const draggedDomIdx = children.indexOf(evt.item);
+          if (draggedDomIdx < 0) return;
+
+          // No-op if drop zone is at the dragged card's current slot (before or immediately after itself).
+          if (zone === draggedDomIdx || zone === draggedDomIdx + 1) return;
+
+          // Build the target DOM sequence: remove dragged item, then splice it in at the target zone.
+          const seq = children.slice();
+          seq.splice(draggedDomIdx, 1);
+          const adjustedZone = zone > draggedDomIdx ? zone - 1 : zone;
+          seq.splice(adjustedZone, 0, evt.item);
+
+          // Walk the sequence to produce the new segments[], accumulating consecutive buffers
+          // into the next card's bufferBefore. Capture bufferBefore values up-front to avoid a
+          // read-after-write bug when a card appears before its own "buf→self" entry in seq.
+          const oldSegs = this.meeting.segments;
+          const origBuffers = oldSegs.map(s => s.bufferBefore || 0);
+
+          const newSegs = [];
+          let pendingBuffer = 0;
+          for (const child of seq) {
+            const kind = child.dataset.kind;
+            if (kind === "buffer") {
+              const bufSegIdx = parseInt(child.dataset.segIdx);
+              if (!isNaN(bufSegIdx) && oldSegs[bufSegIdx]) {
+                pendingBuffer += origBuffers[bufSegIdx];
+              }
+            } else if (kind === "card") {
+              const cardSegIdx = parseInt(child.dataset.segIdx);
+              const seg = oldSegs[cardSegIdx];
+              if (seg) {
+                seg.bufferBefore = pendingBuffer;
+                newSegs.push(seg);
+                pendingBuffer = 0;
+              }
+            }
+          }
+
+          // FLIP animation: capture each card's current bbox (keyed by stable seg.id),
+          // mutate state, then after Alpine rerender apply an inverse transform and transition
+          // it back to zero — the browser animates position change smoothly.
+          const firstRects = new Map();
+          for (const card of el.querySelectorAll(".segment-card[data-seg-id]")) {
+            firstRects.set(card.dataset.segId, card.getBoundingClientRect());
+          }
+
+          // Use splice() to mutate the array in place — Alpine reactivity picks up ordered
+          // changes more reliably than a fresh assignment (which can leave the DOM stale if
+          // Sortable's post-drop cleanup races with the re-render).
+          this.meeting.segments.splice(0, this.meeting.segments.length, ...newSegs);
+          if (this.meeting.segments[0]) this.meeting.segments[0].bufferBefore = 0;
+
+          this.cascadeStartTimes();
+          this.refreshDerivedState();
+
+          this.$nextTick(() => {
+            const cards = el.querySelectorAll(".segment-card[data-seg-id]");
+            const draggedId = evt.item && evt.item.dataset && evt.item.dataset.segId;
+            for (const card of cards) {
+              const oldRect = firstRects.get(card.dataset.segId);
+              if (!oldRect) continue;
+              const newRect = card.getBoundingClientRect();
+              const dy = oldRect.top - newRect.top;
+              if (Math.abs(dy) < 1) continue;
+              // Stack dragged card behind the others so downward insertion looks the same as
+              // upward insertion — the moving card slides "behind" its siblings instead of
+              // sitting on top of them (which is the natural DOM order).
+              card.style.position = "relative";
+              card.style.zIndex = card.dataset.segId === draggedId ? "0" : "1";
+              card.style.transition = "none";
+              card.style.transform = "translateY(" + dy + "px)";
+              card.offsetHeight;                                       // force reflow to commit the invert
+              card.style.transition = "transform 1000ms cubic-bezier(.2,.7,.3,1)";
+              card.style.transform = "";
+            }
+            setTimeout(() => {
+              for (const card of cards) {
+                card.style.transition = ""; card.style.transform = "";
+                card.style.position = ""; card.style.zIndex = "";
+              }
+            }, 1050);
+          });
+        },
+        onUnchoose: (evt) => {
+          // NOTE: With onMove always returning false, Sortable fires `unchoose` BEFORE `end`
+          // (Sortable treats the drag as "no valid target" → cancel path). DO NOT clear
+          // _dragChildren / _dropZone here — onEnd needs to read them. Only clean up the
+          // drop-line DOM element, which doesn't have this dependency.
+          if (this._dropLine && this._dropLine.parentElement) this._dropLine.remove();
         }
       });
     },
 
-    recalculateTimes() {
-      if (!this.meeting.segments.length) return;
-      let [h, m] = (this.meeting.meta.startTime || "19:15").split(":").map(Number);
-      this.meeting.segments.forEach((seg, i) => {
-        seg.startTime = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
-        m += seg.duration;
-        if (i < this.meeting.segments.length - 1) m += 1; // 1-min buffer
-        while (m >= 60) { h++; m -= 60; }
-      });
+    refreshDerivedState() {
+      // Recompute meta.endTime from the last segment and refresh timeline bars.
+      // Does NOT overwrite per-segment start times — those come from the LLM or the user.
+      if (!this.meeting.segments.length) {
+        this.updateTimelinePositions();
+        return;
+      }
       const last = this.meeting.segments[this.meeting.segments.length - 1];
-      const [lh, lm] = last.startTime.split(":").map(Number);
-      let endMin = lh * 60 + lm + last.duration;
-      this.meeting.meta.endTime = String(Math.floor(endMin / 60)).padStart(2, "0") + ":" + String(endMin % 60).padStart(2, "0");
+      if (last && last.startTime) {
+        const [lh, lm] = last.startTime.split(":").map(Number);
+        const endMin = lh * 60 + lm + (last.duration || 0);
+        this.meeting.meta.endTime = String(Math.floor(endMin / 60)).padStart(2, "0") + ":" + String(endMin % 60).padStart(2, "0");
+      }
       this.updateTimelinePositions();
+    },
+
+    gapInfo(idx) {
+      // Minutes between segment[idx-1].end and segment[idx].start.
+      // null: first segment / missing times; 0: back-to-back; >0: buffer or gap; <0: overlap.
+      if (idx === 0) return null;
+      const segs = this.meeting.segments;
+      const prev = segs[idx - 1];
+      const cur = segs[idx];
+      if (!prev || !cur || !prev.startTime || !cur.startTime) return null;
+      const [ph, pm] = prev.startTime.split(":").map(Number);
+      const [ch, cm] = cur.startTime.split(":").map(Number);
+      return (ch * 60 + cm) - (ph * 60 + pm + (prev.duration || 0));
     },
 
     async sendMessage() {
@@ -699,7 +912,7 @@ function meetingApp() {
           const parsed = this.parseJSON(r.content);
           if (!parsed) return { success: false, error: "Executor output was not valid JSON" };
           this.applyAgendaJSON(parsed);
-          return { success: true, summary: this.digestAgenda() };
+          return { success: true, agenda: this.fullAgendaSnapshot() };
         }
 
         if (tc.name === "adjust_meeting") {
@@ -718,7 +931,7 @@ function meetingApp() {
           const parsed = this.parseJSON(r.content);
           if (!parsed) return { success: false, error: "Executor output was not valid JSON" };
           this.applyAgendaJSON(parsed);
-          return { success: true, summary: this.digestAgenda() };
+          return { success: true, agenda: this.fullAgendaSnapshot() };
         }
 
         return { success: false, error: "Unknown tool: " + tc.name };
@@ -729,53 +942,59 @@ function meetingApp() {
     },
 
     applyAgendaJSON(parsed) {
-      if (parsed.meta) {
-        const m = parsed.meta;
-        this.meeting.meta = {
-          ...this.meeting.meta,
-          no: m.no ?? this.meeting.meta.no,
-          type: m.type ?? this.meeting.meta.type,
-          theme: m.theme ?? this.meeting.meta.theme,
-          manager: m.manager ?? this.meeting.meta.manager,
-          date: m.date ?? this.meeting.meta.date,
-          startTime: m.startTime || m.start_time || this.meeting.meta.startTime,
-          endTime: m.endTime || m.end_time || this.meeting.meta.endTime,
-          location: m.location ?? this.meeting.meta.location,
-          introduction: m.introduction ?? this.meeting.meta.introduction
-        };
-      }
+      if (!parsed) return;
+      // The create_meeting prompt examples emit flat JSON (meta fields at top level),
+      // while adjust_meeting / fullAgendaSnapshot use a wrapped { meta, segments } shape.
+      // Accept either: fall back to parsed itself when there's no meta wrapper.
+      const m = parsed.meta || parsed;
+      this.meeting.meta = {
+        ...this.meeting.meta,
+        no: m.no ?? this.meeting.meta.no,
+        type: m.type ?? this.meeting.meta.type,
+        theme: m.theme ?? this.meeting.meta.theme,
+        manager: m.manager ?? this.meeting.meta.manager,
+        date: m.date ?? this.meeting.meta.date,
+        startTime: m.startTime || m.start_time || this.meeting.meta.startTime,
+        endTime: m.endTime || m.end_time || this.meeting.meta.endTime,
+        location: m.location ?? this.meeting.meta.location,
+        introduction: m.introduction ?? this.meeting.meta.introduction
+      };
       if (Array.isArray(parsed.segments)) {
-        this.meeting.segments = parsed.segments.map((s, i) => this.enrichSegment(s, i));
-        // Trust LLM's per-segment start times — don't overwrite them.
-        // Just refresh derived state: meta.endTime from the last segment, and timeline bars.
-        const last = this.meeting.segments[this.meeting.segments.length - 1];
-        if (last && last.startTime) {
-          const [lh, lm] = last.startTime.split(":").map(Number);
-          const endMin = lh * 60 + lm + (last.duration || 0);
-          this.meeting.meta.endTime = String(Math.floor(endMin / 60)).padStart(2, "0") + ":" + String(endMin % 60).padStart(2, "0");
-        }
-        this.updateTimelinePositions();
+        // Defensive: drop any segment whose type is a buffer/gap placeholder — buffers are
+        // modelled as time gaps between real segments, never as segments themselves.
+        const realSegments = parsed.segments.filter(s => {
+          const t = (s.type || "").toLowerCase().trim();
+          return t && t !== "buffer" && t !== "gap" && t !== "间隔" && t !== "空档" && t !== "pause" && t !== "break time";
+        });
+        this.meeting.segments = realSegments.map((s, i) => this.enrichSegment(s, i));
+        this.deriveBuffers();
+        this.refreshDerivedState();
       }
       if (this.streamingMsg) this.streamingMsg.segments = this.meeting.segments.length;
     },
 
-    digestAgenda() {
-      // Compact snapshot returned to the router as tool_result — enough context for the
-      // next turn's adjustments without dumping the whole JSON.
-      const roles = {};
-      for (const seg of this.meeting.segments) {
-        if (seg.roleTaker && seg.roleTaker !== "All" && seg.roleTaker !== "") {
-          roles[seg.type] = seg.roleTaker;
-        }
-      }
+    fullAgendaSnapshot() {
+      // Returned as tool_result payload. Full state (not a summary) so the router can
+      // point to any previous turn's version — needed for "revert to the previous agenda"
+      // style requests that would otherwise have no authoritative source to restore from.
       return {
-        no: this.meeting.meta.no,
-        theme: this.meeting.meta.theme,
-        type: this.meeting.meta.type,
-        start_time: this.meeting.meta.startTime,
-        end_time: this.meeting.meta.endTime,
-        segment_count: this.meeting.segments.length,
-        roles
+        meta: {
+          no: this.meeting.meta.no,
+          type: this.meeting.meta.type,
+          theme: this.meeting.meta.theme,
+          manager: this.meeting.meta.manager,
+          date: this.meeting.meta.date,
+          startTime: this.meeting.meta.startTime,
+          endTime: this.meeting.meta.endTime,
+          location: this.meeting.meta.location,
+          introduction: this.meeting.meta.introduction
+        },
+        segments: this.meeting.segments.map(s => ({
+          type: s.type,
+          startTime: s.startTime,
+          duration: s.duration,
+          roleTaker: s.roleTaker
+        }))
       };
     },
 
@@ -783,14 +1002,47 @@ function meetingApp() {
       const segType = s.type || "";
       const def = SEGMENT_DEFAULTS.find(d => segType.includes(d.type) || d.type.includes(segType)) || {};
       return {
-        id: "seg_" + String(idx).padStart(3, "0") + "_" + Date.now(),
+        id: "seg_" + String(idx).padStart(3, "0") + "_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
         type: segType,
         startTime: s.startTime || s.start_time || "",
         duration: parseInt(s.duration) || def.defaultDuration || 5,
         roleTaker: s.roleTaker || s.role_taker || "",
+        bufferBefore: 0,  // derived in applyAgendaJSON after enrichment; updated on drag.
         isOptional: def.isOptional || false,
         color: def.color || "#94a3b8"
       };
+    },
+
+    deriveBuffers() {
+      // After segments[] is set with LLM-provided startTimes, compute bufferBefore for each.
+      // bufferBefore[0] = 0 (first segment anchored to meta.startTime).
+      // bufferBefore[i] = segments[i].startTime - (segments[i-1].startTime + segments[i-1].duration).
+      // Result can be negative (overlap) or positive (gap); we store as-is.
+      for (let i = 0; i < this.meeting.segments.length; i++) {
+        const cur = this.meeting.segments[i];
+        if (i === 0) { cur.bufferBefore = 0; continue; }
+        const prev = this.meeting.segments[i - 1];
+        if (!cur.startTime || !prev.startTime) { cur.bufferBefore = 0; continue; }
+        const [ph, pm] = prev.startTime.split(":").map(Number);
+        const [ch, cm] = cur.startTime.split(":").map(Number);
+        cur.bufferBefore = (ch * 60 + cm) - (ph * 60 + pm + (prev.duration || 0));
+      }
+    },
+
+    cascadeStartTimes() {
+      // Rewrite every segment.startTime from meta.startTime anchor + chained (prev.duration + cur.bufferBefore).
+      // Used after drag-and-drop reorder so total meeting time stays fixed.
+      if (!this.meeting.segments.length) return;
+      const anchor = this.meeting.meta.startTime || "19:15";
+      const [startH, startM] = anchor.split(":").map(Number);
+      let minutes = startH * 60 + startM;
+      this.meeting.segments.forEach((seg, i) => {
+        if (i > 0) minutes += (seg.bufferBefore || 0);
+        const h = Math.floor(minutes / 60);
+        const m = minutes % 60;
+        seg.startTime = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+        minutes += (seg.duration || 0);
+      });
     },
 
     syncSelect(el, cfg) {
