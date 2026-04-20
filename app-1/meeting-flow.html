@@ -399,19 +399,20 @@
 <script>
 function meetingApp() {
   const SEGMENT_DEFAULTS = [
-    { type: "Guests Registration", defaultDuration: 15, isOptional: false, color: "#3b82f6" },
-    { type: "Meeting Rules Introduction (SAA)", defaultDuration: 2, isOptional: false, color: "#10b981" },
-    { type: "Opening Remarks", defaultDuration: 2, isOptional: false, color: "#10b981" },
-    { type: "TOM Introduction", defaultDuration: 2, isOptional: false, color: "#6366f1" },
+    // Colors group roles: green=Host, violet=Facilitators, orange=Speakers, yellow=Evaluators, slate=Misc.
+    { type: "Guests Registration", defaultDuration: 15, isOptional: false, color: "#94a3b8" },
+    { type: "Meeting Rules Introduction (SAA)", defaultDuration: 2, isOptional: false, color: "#8b5cf6" },
+    { type: "Opening Remarks", defaultDuration: 2, isOptional: false, color: "#8b5cf6" },
+    { type: "TOM Introduction", defaultDuration: 2, isOptional: false, color: "#10b981" },
     { type: "Timer", defaultDuration: 2, isOptional: false, color: "#8b5cf6" },
     { type: "Grammarian", defaultDuration: 2, isOptional: true, color: "#8b5cf6" },
     { type: "Hark Master", defaultDuration: 1, isOptional: true, color: "#8b5cf6" },
     { type: "Aha Counter", defaultDuration: 1, isOptional: true, color: "#8b5cf6" },
-    { type: "Guests Self Introduction", defaultDuration: 5, isOptional: false, color: "#14b8a6" },
-    { type: "TTM Opening", defaultDuration: 2, isOptional: false, color: "#f59e0b" },
-    { type: "Table Topic Session", defaultDuration: 20, isOptional: false, color: "#f97316" },
-    { type: "Workshop", defaultDuration: 25, isOptional: true, color: "#ef4444" },
-    { type: "Prepared Speech", defaultDuration: 7, isOptional: true, color: "#ef4444" },
+    { type: "Guests Self Introduction", defaultDuration: 5, isOptional: false, color: "#10b981" },
+    { type: "TTM Opening", defaultDuration: 2, isOptional: false, color: "#10b981" },
+    { type: "Table Topic Session", defaultDuration: 20, isOptional: false, color: "#10b981" },
+    { type: "Workshop", defaultDuration: 25, isOptional: true, color: "#f97316" },
+    { type: "Prepared Speech", defaultDuration: 7, isOptional: true, color: "#f97316" },
     { type: "Tea Break & Group Photos", defaultDuration: 10, isOptional: false, color: "#94a3b8" },
     { type: "Table Topic Evaluation", defaultDuration: 7, isOptional: false, color: "#eab308" },
     { type: "Prepared Speech Evaluation", defaultDuration: 3, isOptional: true, color: "#eab308" },
@@ -419,11 +420,11 @@ function meetingApp() {
     { type: "Aha Counter Report", defaultDuration: 2, isOptional: true, color: "#8b5cf6" },
     { type: "Timer Report", defaultDuration: 2, isOptional: false, color: "#8b5cf6" },
     { type: "Hark Master Pop Quiz", defaultDuration: 5, isOptional: true, color: "#8b5cf6" },
-    { type: "General Evaluation", defaultDuration: 8, isOptional: false, color: "#ec4899" },
-    { type: "Voting Section", defaultDuration: 2, isOptional: false, color: "#6366f1" },
-    { type: "Moment of Truth", defaultDuration: 7, isOptional: false, color: "#ec4899" },
-    { type: "Awards", defaultDuration: 2, isOptional: false, color: "#f43f5e" },
-    { type: "Closing Remarks", defaultDuration: 1, isOptional: false, color: "#10b981" }
+    { type: "General Evaluation", defaultDuration: 8, isOptional: false, color: "#eab308" },
+    { type: "Voting Section", defaultDuration: 2, isOptional: false, color: "#94a3b8" },
+    { type: "Moment of Truth", defaultDuration: 7, isOptional: false, color: "#10b981" },
+    { type: "Awards", defaultDuration: 2, isOptional: false, color: "#94a3b8" },
+    { type: "Closing Remarks", defaultDuration: 1, isOptional: false, color: "#94a3b8" }
   ];
 
   // CLUB_MEMBERS, prompts are defined in prompts.js
@@ -1000,7 +1001,16 @@ function meetingApp() {
 
     enrichSegment(s, idx) {
       const segType = s.type || "";
-      const def = SEGMENT_DEFAULTS.find(d => segType.includes(d.type) || d.type.includes(segType)) || {};
+      // Color by keyword first — robust to LLM wording variations:
+      //   "evaluation" → Evaluators (yellow); "speech" / "workshop" → Speakers (orange).
+      // Everything else: exact match on SEGMENT_DEFAULTS (parentheticals stripped), fallback gray.
+      const norm = (t) => (t || "").replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+      const lower = segType.toLowerCase();
+      const def = SEGMENT_DEFAULTS.find(d => norm(d.type) === norm(segType)) || {};
+      let color;
+      if (lower.includes("evaluation")) color = "#eab308";
+      else if (lower.includes("speech") || lower.includes("workshop")) color = "#f97316";
+      else color = def.color || "#94a3b8";
       return {
         id: "seg_" + String(idx).padStart(3, "0") + "_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
         type: segType,
@@ -1009,7 +1019,7 @@ function meetingApp() {
         roleTaker: s.roleTaker || s.role_taker || "",
         bufferBefore: 0,  // derived in applyAgendaJSON after enrichment; updated on drag.
         isOptional: def.isOptional || false,
-        color: def.color || "#94a3b8"
+        color
       };
     },
 
@@ -1441,28 +1451,28 @@ function meetingApp() {
           introduction: "Imagine a world where half the women you meet are over 50..."
         },
         segments: [
-          { id: "s1", type: "Guests Registration", startTime: "19:15", duration: 15, roleTaker: "All", isOptional: false, color: "#3b82f6" },
-          { id: "s2", type: "Meeting Rules Introduction (SAA)", startTime: "19:30", duration: 3, roleTaker: "Joyce Feng", isOptional: false, color: "#10b981" },
-          { id: "s3", type: "Opening Remarks", startTime: "19:33", duration: 2, roleTaker: "Libra Lee", isOptional: false, color: "#10b981" },
-          { id: "s4", type: "TOM Introduction", startTime: "19:35", duration: 2, roleTaker: "Rui Zheng", isOptional: false, color: "#6366f1" },
+          { id: "s1", type: "Guests Registration", startTime: "19:15", duration: 15, roleTaker: "All", isOptional: false, color: "#94a3b8" },
+          { id: "s2", type: "Meeting Rules Introduction (SAA)", startTime: "19:30", duration: 3, roleTaker: "Joyce Feng", isOptional: false, color: "#8b5cf6" },
+          { id: "s3", type: "Opening Remarks", startTime: "19:33", duration: 2, roleTaker: "Libra Lee", isOptional: false, color: "#8b5cf6" },
+          { id: "s4", type: "TOM Introduction", startTime: "19:35", duration: 2, roleTaker: "Rui Zheng", isOptional: false, color: "#10b981" },
           { id: "s5", type: "Timer", startTime: "19:37", duration: 3, roleTaker: "Max Long", isOptional: false, color: "#8b5cf6" },
           { id: "s6", type: "Hark Master", startTime: "19:40", duration: 3, roleTaker: "Mia", isOptional: true, color: "#8b5cf6" },
-          { id: "s7", type: "Guests Self Introduction", startTime: "19:43", duration: 8, roleTaker: "Joseph Zhang", isOptional: false, color: "#14b8a6" },
-          { id: "s8", type: "TTM Opening", startTime: "19:52", duration: 4, roleTaker: "Rui Zheng", isOptional: false, color: "#f59e0b" },
-          { id: "s9", type: "Table Topic Session", startTime: "19:56", duration: 16, roleTaker: "All", isOptional: false, color: "#f97316" },
-          { id: "s10", type: "Prepared Speech", startTime: "20:13", duration: 7, roleTaker: "Frank Zeng", isOptional: true, color: "#ef4444" },
-          { id: "s11", type: "Prepared Speech", startTime: "20:21", duration: 7, roleTaker: "Libra Lee", isOptional: true, color: "#ef4444" },
+          { id: "s7", type: "Guests Self Introduction", startTime: "19:43", duration: 8, roleTaker: "Joseph Zhang", isOptional: false, color: "#10b981" },
+          { id: "s8", type: "TTM Opening", startTime: "19:52", duration: 4, roleTaker: "Rui Zheng", isOptional: false, color: "#10b981" },
+          { id: "s9", type: "Table Topic Session", startTime: "19:56", duration: 16, roleTaker: "All", isOptional: false, color: "#10b981" },
+          { id: "s10", type: "Prepared Speech", startTime: "20:13", duration: 7, roleTaker: "Frank Zeng", isOptional: true, color: "#f97316" },
+          { id: "s11", type: "Prepared Speech", startTime: "20:21", duration: 7, roleTaker: "Libra Lee", isOptional: true, color: "#f97316" },
           { id: "s12", type: "Tea Break & Group Photos", startTime: "20:29", duration: 12, roleTaker: "All", isOptional: false, color: "#94a3b8" },
           { id: "s13", type: "Table Topic Evaluation", startTime: "20:42", duration: 7, roleTaker: "Emily", isOptional: false, color: "#eab308" },
           { id: "s14", type: "Prepared Speech Evaluation", startTime: "20:50", duration: 3, roleTaker: "Phyllis", isOptional: true, color: "#eab308" },
           { id: "s15", type: "Prepared Speech Evaluation", startTime: "20:54", duration: 3, roleTaker: "Amanda", isOptional: true, color: "#eab308" },
           { id: "s16", type: "Timer Report", startTime: "20:58", duration: 2, roleTaker: "Max Long", isOptional: false, color: "#8b5cf6" },
           { id: "s17", type: "Hark Master Pop Quiz", startTime: "21:01", duration: 5, roleTaker: "Mia", isOptional: true, color: "#8b5cf6" },
-          { id: "s18", type: "General Evaluation", startTime: "21:07", duration: 4, roleTaker: "Karman", isOptional: false, color: "#ec4899" },
-          { id: "s19", type: "Voting Section", startTime: "21:16", duration: 2, roleTaker: "Rui Zheng", isOptional: false, color: "#6366f1" },
-          { id: "s20", type: "Moment of Truth", startTime: "21:19", duration: 7, roleTaker: "Leta Li", isOptional: false, color: "#ec4899" },
-          { id: "s21", type: "Awards", startTime: "21:27", duration: 3, roleTaker: "Libra Lee", isOptional: false, color: "#f43f5e" },
-          { id: "s22", type: "Closing Remarks", startTime: "21:30", duration: 1, roleTaker: "Libra Lee", isOptional: false, color: "#10b981" }
+          { id: "s18", type: "General Evaluation", startTime: "21:07", duration: 4, roleTaker: "Karman", isOptional: false, color: "#eab308" },
+          { id: "s19", type: "Voting Section", startTime: "21:16", duration: 2, roleTaker: "Rui Zheng", isOptional: false, color: "#94a3b8" },
+          { id: "s20", type: "Moment of Truth", startTime: "21:19", duration: 7, roleTaker: "Leta Li", isOptional: false, color: "#10b981" },
+          { id: "s21", type: "Awards", startTime: "21:27", duration: 3, roleTaker: "Libra Lee", isOptional: false, color: "#94a3b8" },
+          { id: "s22", type: "Closing Remarks", startTime: "21:30", duration: 1, roleTaker: "Libra Lee", isOptional: false, color: "#94a3b8" }
         ]
       };
       this.updateTimelinePositions();

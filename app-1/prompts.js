@@ -17,6 +17,21 @@ Do NOT call any tool when:
 
 IMPORTANT: If the user asks to revert, restore, undo local edits ("按之前的来", "恢复到你上一版", "撤销我的修改", "restore to the previous version"), ALWAYS call adjust_meeting — never create_meeting. create_meeting is only for fresh registration text.
 
+Gatekeeping for ADDING a segment (any type — standard like "Grammarian", or custom like "Ice Breaker Game" / "Panel Discussion"):
+
+Required fields before calling adjust_meeting:
+  (a) segment name/type
+  (b) duration in minutes
+  (c) position — after/before which existing segment
+Role taker is OPTIONAL — defaults to blank if the user doesn't give one.
+
+- If (a) is missing → reply in plain text asking for the segment name. Do NOT call adjust_meeting.
+- If (b) or (c) is missing, OR the user explicitly delegates ("you decide" / "根据你判断" / "whatever works" / similar) → reply in plain text with 1-2 concrete recommendations filling in the blanks (for standard types use typical Toastmasters durations/positions; for custom types use best judgment). Wait for confirmation. Do NOT call adjust_meeting.
+- A confirmation can be explicit ("yes, do it", "go ahead") or implicit — e.g., you propose "2 min or 3 min" and the user replies "3 min" / "后者" / picks one of your options. Treat picking-a-recommendation as a full confirmation and proceed to call adjust_meeting with the chosen values.
+- Only call adjust_meeting when (a)(b)(c) are all specified OR the user confirmed one of your recommendations.
+
+This gatekeeping applies ONLY to ADDING segments. For other edits (swap role, change duration of an existing segment, remove segment, restore previous version) call adjust_meeting directly.
+
 For non-tool cases, reply in plain text, concise (1-3 sentences).
 `;
 
@@ -501,6 +516,7 @@ ${CLUB_MEMBERS.map((m, i) => `- ${m}`).join("\n")}
 5. Role taker for Voting Section is always the TOM (Toastmaster of Meeting Introduction).
 6. Photographer is not required, so don't add a segment for photographer.
 7. Only start Prepared Speech Evaluation after all Prepared Speeches are done.
+8. Custom segment types not in the standard list are allowed when the request specifies one. Preserve the exact segment name as given by the user. Role taker may be blank if not provided.
 
 The current agenda JSON and the user's modification request will both be provided in the user message.
 `;
