@@ -193,17 +193,33 @@
             @input="providers[activeProvider].model = $el.value"
             placeholder="Custom model..."
             class="text-xs border rounded-md px-2 py-1 flex-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+          <label class="flex items-center gap-1.5 select-none"
+            :class="mustThink(activeProvider, providers[activeProvider].model) ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'"
+            :title="mustThink(activeProvider, providers[activeProvider].model) ? 'This model always thinks' : 'Enable thinking'">
+            <div class="relative">
+              <input type="checkbox"
+                :checked="effectiveThinking(activeProvider, providers[activeProvider])"
+                @change="providers[activeProvider].thinkingEnabled = $el.checked"
+                :disabled="mustThink(activeProvider, providers[activeProvider].model)"
+                class="sr-only peer">
+              <div class="w-8 h-4 bg-gray-300 peer-checked:bg-blue-500 rounded-full transition"></div>
+              <div class="absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition peer-checked:translate-x-4"></div>
+            </div>
+            <span class="text-xs text-gray-600">think</span>
+          </label>
           <select x-show="activeProvider === 'deepseek'"
             x-model="providers[activeProvider].reasoningEffort"
+            :disabled="!effectiveThinking(activeProvider, providers[activeProvider])"
             title="Reasoning effort"
-            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none disabled:opacity-40 disabled:cursor-not-allowed">
             <option value="high">high</option>
             <option value="max">max</option>
           </select>
           <select x-show="activeProvider !== 'deepseek'"
             x-model="providers[activeProvider].reasoningEffort"
+            :disabled="!effectiveThinking(activeProvider, providers[activeProvider])"
             title="Reasoning effort"
-            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none disabled:opacity-40 disabled:cursor-not-allowed">
             <option value="low">low</option>
             <option value="medium">medium</option>
             <option value="high">high</option>
@@ -381,6 +397,7 @@ function meetingApp() {
         baseUrl: localStorage.getItem("mf_ds_baseUrl") || "https://api.deepseek.com",
         model: localStorage.getItem("mf_ds_model") || "model1",
         reasoningEffort: localStorage.getItem("mf_ds_effort") || "max",
+        thinkingEnabled: localStorage.getItem("mf_ds_thinking") !== "false",
         presetModels: ["model1"]
       },
       openai: {
@@ -388,6 +405,7 @@ function meetingApp() {
         baseUrl: localStorage.getItem("mf_oai_baseUrl") || "https://api.openai.com",
         model: localStorage.getItem("mf_oai_model") || "gpt-5.4-nano",
         reasoningEffort: localStorage.getItem("mf_oai_effort") || "high",
+        thinkingEnabled: localStorage.getItem("mf_oai_thinking") !== "false",
         presetModels: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "o3", "o3-mini", "o4-mini"]
       },
       anthropic: {
@@ -395,6 +413,7 @@ function meetingApp() {
         baseUrl: localStorage.getItem("mf_anth_baseUrl") || "https://api.anthropic.com",
         model: localStorage.getItem("mf_anth_model") || "claude-haiku-4-5",
         reasoningEffort: localStorage.getItem("mf_anth_effort") || "high",
+        thinkingEnabled: localStorage.getItem("mf_anth_thinking") !== "false",
         presetModels: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
       },
       gemini: {
@@ -402,6 +421,7 @@ function meetingApp() {
         baseUrl: localStorage.getItem("mf_gem_baseUrl") || "https://generativelanguage.googleapis.com/v1beta",
         model: localStorage.getItem("mf_gem_model") || "gemini-2.5-flash-lite",
         reasoningEffort: localStorage.getItem("mf_gem_effort") || "high",
+        thinkingEnabled: localStorage.getItem("mf_gem_thinking") !== "false",
         presetModels: ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash-lite", "gemini-3-deep-think"]
       }
     },
@@ -617,6 +637,18 @@ function meetingApp() {
       return /^o[1-9]/.test(model) || /^gpt-5/.test(model);
     },
 
+    mustThink(provider, model) {
+      // Models that cannot have thinking turned off — the toggle is forced on for these.
+      if (provider === 'openai') return /^o[1-9]/.test(model);            // o-series: no reasoning_effort:"none"
+      if (provider === 'anthropic') return /^claude-mythos/.test(model);  // Mythos rejects type:"disabled"
+      if (provider === 'gemini') return /^gemini-3\.1-pro/.test(model) || /^gemini-3-deep-think/.test(model);
+      return false;
+    },
+
+    effectiveThinking(provider, cfg) {
+      return this.mustThink(provider, cfg.model) || cfg.thinkingEnabled !== false;
+    },
+
     anthropicUsesAdaptive(model) {
       // Models where `thinking.type: "adaptive"` is required (opus-4-7) or preferred (opus-4-6, sonnet-4-6).
       return /^(claude-opus-4-7|claude-opus-4-6|claude-sonnet-4-6|claude-mythos)/.test(model);
@@ -644,18 +676,22 @@ function meetingApp() {
     buildOpenAIBody(cfg, messages, stream) {
       const body = { model: cfg.model, messages };
       if (stream) body.stream = true;
+      const thinking = this.effectiveThinking(this.activeProvider, cfg);
       if (this.activeProvider === 'deepseek') {
-        body.thinking = { type: "enabled" };
-        body.reasoning_effort = cfg.reasoningEffort || "max";
+        if (thinking) {
+          body.thinking = { type: "enabled" };
+          body.reasoning_effort = cfg.reasoningEffort || "max";
+        }
         body.temperature = 0.3;
         return body;
       }
       body.max_completion_tokens = 16384;
       const effort = cfg.reasoningEffort || "high";
-      if (this.isReasoningModel(cfg.model) && effort !== "none") {
+      if (thinking && this.isReasoningModel(cfg.model) && effort !== "none") {
         // gpt-5.x / o-series: reasoning_effort > none forbids temperature/top_p/logprobs.
         body.reasoning_effort = effort === "max" ? "xhigh" : effort;
       } else {
+        if (thinking === false && this.isReasoningModel(cfg.model)) body.reasoning_effort = "none";
         body.temperature = 0.3;
       }
       return body;
@@ -663,8 +699,14 @@ function meetingApp() {
 
     buildAnthropicBody(cfg, systemPrompt, messages, stream) {
       const effort = cfg.reasoningEffort || "high";
+      const thinking = this.effectiveThinking('anthropic', cfg);
       const body = { model: cfg.model, system: systemPrompt, messages, max_tokens: 16384 };
       if (stream) body.stream = true;
+      if (!thinking) {
+        body.thinking = { type: "disabled" };
+        body.temperature = 0.3;
+        return body;
+      }
       if (this.anthropicUsesAdaptive(cfg.model)) {
         body.thinking = { type: "adaptive" };
         body.output_config = { effort };
@@ -677,14 +719,25 @@ function meetingApp() {
 
     buildGeminiBody(cfg, systemPrompt, contents) {
       const effort = cfg.reasoningEffort || "high";
-      const thinkingConfig = { includeThoughts: true };
-      if (this.geminiUses3x(cfg.model)) thinkingConfig.thinkingLevel = this.geminiLevel(effort);
-      else thinkingConfig.thinkingBudget = this.geminiBudget(effort);
+      const thinking = this.effectiveThinking('gemini', cfg);
+      const generationConfig = { maxOutputTokens: 16384 };
+      if (thinking) {
+        const thinkingConfig = { includeThoughts: true };
+        if (this.geminiUses3x(cfg.model)) thinkingConfig.thinkingLevel = this.geminiLevel(effort);
+        else thinkingConfig.thinkingBudget = this.geminiBudget(effort);
+        generationConfig.thinkingConfig = thinkingConfig;
+        // temperature omitted for parity with OpenAI/Anthropic reasoning paths (both forbid it when thinking is on).
+      } else {
+        // 2.5: budget 0 disables; 3.x: minimum level (some 3.x variants can't fully disable).
+        generationConfig.thinkingConfig = this.geminiUses3x(cfg.model)
+          ? { thinkingLevel: "minimal", includeThoughts: false }
+          : { thinkingBudget: 0, includeThoughts: false };
+        generationConfig.temperature = 0.3;
+      }
       return {
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents,
-        // temperature omitted for parity with OpenAI/Anthropic reasoning paths (both forbid it when thinking is on).
-        generationConfig: { maxOutputTokens: 16384, thinkingConfig }
+        generationConfig
       };
     },
 
@@ -1037,6 +1090,7 @@ function meetingApp() {
         localStorage.setItem(p + "_baseUrl", cfg.baseUrl);
         localStorage.setItem(p + "_model", cfg.model);
         if (cfg.reasoningEffort) localStorage.setItem(p + "_effort", cfg.reasoningEffort);
+        localStorage.setItem(p + "_thinking", cfg.thinkingEnabled ? "true" : "false");
         if (cfg.apiKey) localStorage.setItem("mf_" + name + "_key", cfg.apiKey);
       });
       localStorage.setItem("mf_activeProvider", this.activeProvider);
@@ -1076,6 +1130,7 @@ function meetingApp() {
       localStorage.setItem(p + "_baseUrl", cfg.baseUrl);
       localStorage.setItem(p + "_model", cfg.model);
       if (cfg.reasoningEffort) localStorage.setItem(p + "_effort", cfg.reasoningEffort);
+      localStorage.setItem(p + "_thinking", cfg.thinkingEnabled ? "true" : "false");
       if (cfg.apiKey) localStorage.setItem("mf_" + name + "_key", cfg.apiKey);
     },
 
