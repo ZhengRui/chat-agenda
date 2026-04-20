@@ -322,7 +322,6 @@
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-medium text-gray-800 truncate" x-text="seg.type"></span>
-                <span x-show="seg.isOptional" class="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded">opt</span>
               </div>
               <div class="text-xs text-gray-500" x-text="seg.roleTaker || 'No role taker'"></div>
             </div>
@@ -594,8 +593,24 @@ function meetingApp() {
         const onThinking = (chunk) => { this.streamingMsg.thinking += chunk; this.scrollChat(); };
         const onContent = (chunk) => { this.streamingMsg.content += chunk; this.scrollChat(); };
 
-        // Router: SYSTEM_PROMPT + full history (streamingMsg is streaming:true so it's filtered out of the payload).
+        // Router: SYSTEM_PROMPT + full history (streamingMsg is streaming:true so it's filtered out).
+        // Inject the LIVE agenda snapshot at the HEAD of the current user turn only — so the router
+        // always sees the authoritative frontend state (reflecting any manual edits) without
+        // busting prompt-cache prefixes on SYSTEM_PROMPT / tools / prior turns.
         const history = buildHistoryForProvider(this.messages, reqProvider);
+        if (this.meeting.segments.length && history.length) {
+          const snapshot = "[Current agenda (live frontend state — trust this over any earlier tool_result):\n" +
+            JSON.stringify({
+              meta: this.meeting.meta,
+              segments: this.meeting.segments.map(s => ({ type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker }))
+            }, null, 2) + "\n]\n\n";
+          const last = history[history.length - 1];
+          if (typeof last.content === "string") {
+            last.content = snapshot + last.content;
+          } else if (last.parts && last.parts[0] && typeof last.parts[0].text === "string") {
+            last.parts[0].text = snapshot + last.parts[0].text;
+          }
+        }
         const r1 = await this.callLLMStreaming(
           SYSTEM_PROMPT, null, onThinking, onContent,
           this.abortController.signal,
@@ -692,9 +707,11 @@ function meetingApp() {
             meta: this.meeting.meta,
             segments: this.meeting.segments.map(s => ({ type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker }))
           }, null, 2);
-          const userMsg = ADJUST_MEETING_USER_PROMPT.replace("{text}", tc.args?.request || "");
+          // Keep the system prompt stable (cache-friendly) and put the dynamic agenda at the head of the user turn.
+          const userMsg = "## Current Agenda (JSON)\n```json\n" + currentJSON + "\n```\n\n" +
+            ADJUST_MEETING_USER_PROMPT.replace("{text}", tc.args?.request || "");
           const r = await this.callLLMStreaming(
-            ADJUST_MEETING_DEVELOPER_PROMPT + currentJSON, userMsg,
+            ADJUST_MEETING_DEVELOPER_PROMPT, userMsg,
             onThinking, onContent, this.abortController.signal,
             { includeTools: false }
           );
@@ -729,7 +746,15 @@ function meetingApp() {
       }
       if (Array.isArray(parsed.segments)) {
         this.meeting.segments = parsed.segments.map((s, i) => this.enrichSegment(s, i));
-        this.recalculateTimes();
+        // Trust LLM's per-segment start times — don't overwrite them.
+        // Just refresh derived state: meta.endTime from the last segment, and timeline bars.
+        const last = this.meeting.segments[this.meeting.segments.length - 1];
+        if (last && last.startTime) {
+          const [lh, lm] = last.startTime.split(":").map(Number);
+          const endMin = lh * 60 + lm + (last.duration || 0);
+          this.meeting.meta.endTime = String(Math.floor(endMin / 60)).padStart(2, "0") + ":" + String(endMin % 60).padStart(2, "0");
+        }
+        this.updateTimelinePositions();
       }
       if (this.streamingMsg) this.streamingMsg.segments = this.meeting.segments.length;
     },

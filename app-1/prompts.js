@@ -468,9 +468,9 @@ Given the following input, generate the structured agenda for me
 1. If the name match the first or the full name of a club member, then it is from our club. e.g. "Rui" refers to the \
 club member "Rui Zheng", "Ray" and "Rui Zhang" both refer to a guest. In your output, please use full name if it \
 matches to a member.
-2. Between segments there can be a 1 min buffer, e.g. previous segment starts at 20:10 and duration is 2 min, the \
-next segment can start at 20:12 or 20:13. Use this buffering mechanism to adjust time to fill in the whole 2 hours \
-time window.
+2. Between segments a 0-1 minute buffer is OPTIONAL (not required). Use 0 when time is tight — the next segment \
+starts immediately after the previous one ends (e.g. previous starts at 20:10, duration 2 min → next starts at 20:12). \
+Insert a 1-minute buffer only when it helps fill the ~2-hour window without overshooting (e.g. next at 20:13 instead).
 3. Above segments are ordered by time, you can add or remove some segments according to how many people registered but \
 DO NOT change their orders.
 4. Role taker for Opening Remarks, Awards, and Closing Remarks defaults to the current club president Amy Fang. If the registration text explicitly names someone for the role, use that name instead of the default. Note: "Opening Remarks" is sometimes labelled "Club Intro" in the registration text — treat them as the same segment.
@@ -491,14 +491,14 @@ ${CLUB_MEMBERS.map((m, i) => `- ${m}`).join("\n")}
 
 ## Rules (same as initial generation):
 1. If the name match the first or the full name of a club member, then it is from our club. Use full name if it matches to a member.
-2. Between segments there can be a 1 min buffer. Use this buffering mechanism to adjust time to fill in the whole 2 hours time window.
+2. Between segments a 0-1 minute buffer is OPTIONAL (not required). Use 0 when time is tight; insert a 1-minute buffer only when it helps fill the ~2-hour window without overshooting.
 3. Segments are ordered by time, you can add or remove some segments according to the request but DO NOT change their orders.
 4. Role taker for Opening Remarks, Awards, and Closing Remarks defaults to the current club president Amy Fang. If the request or existing agenda names someone for the role, keep/use that name instead of the default. Note: "Opening Remarks" is sometimes labelled "Club Intro" — treat them as the same segment.
 5. Role taker for Voting Section is always the TOM (Toastmaster of Meeting Introduction).
 6. Photographer is not required, so don't add a segment for photographer.
 7. Only start Prepared Speech Evaluation after all Prepared Speeches are done.
 
-## Current Agenda (JSON):
+The current agenda JSON and the user's modification request will both be provided in the user message.
 `;
 
 const ADJUST_MEETING_USER_PROMPT = `## User Request
