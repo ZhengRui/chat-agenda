@@ -473,7 +473,7 @@ next segment can start at 20:12 or 20:13. Use this buffering mechanism to adjust
 time window.
 3. Above segments are ordered by time, you can add or remove some segments according to how many people registered but \
 DO NOT change their orders.
-4. Role taker for Opening Remarks, Awards, and Closing Remarks are always the president of the club Libra Lee.
+4. Role taker for Opening Remarks, Awards, and Closing Remarks defaults to the current club president Amy Fang. If the registration text explicitly names someone for the role, use that name instead of the default. Note: "Opening Remarks" is sometimes labelled "Club Intro" in the registration text — treat them as the same segment.
 5. Role taker for Voting Section is always the TOM (Toastmaster of Meeting Introduction).
 6. Photographer is not required, so don't add a segment for photographer.
 7. Only start Prepared Speech Evaluation after all Prepared Speeches are done.
@@ -493,7 +493,7 @@ ${CLUB_MEMBERS.map((m, i) => `- ${m}`).join("\n")}
 1. If the name match the first or the full name of a club member, then it is from our club. Use full name if it matches to a member.
 2. Between segments there can be a 1 min buffer. Use this buffering mechanism to adjust time to fill in the whole 2 hours time window.
 3. Segments are ordered by time, you can add or remove some segments according to the request but DO NOT change their orders.
-4. Role taker for Opening Remarks, Awards, and Closing Remarks are always the president of the club Libra Lee.
+4. Role taker for Opening Remarks, Awards, and Closing Remarks defaults to the current club president Amy Fang. If the request or existing agenda names someone for the role, keep/use that name instead of the default. Note: "Opening Remarks" is sometimes labelled "Club Intro" — treat them as the same segment.
 5. Role taker for Voting Section is always the TOM (Toastmaster of Meeting Introduction).
 6. Photographer is not required, so don't add a segment for photographer.
 7. Only start Prepared Speech Evaluation after all Prepared Speeches are done.

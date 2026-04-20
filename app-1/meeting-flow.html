@@ -8,6 +8,8 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.x.x/Sortable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.x.x/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 <script src="prompts.js"></script>
 <script src="tools.js"></script>
 <script src="builders.js"></script>
@@ -28,7 +30,7 @@
   .resize-handle::before { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 32px; height: 3px; background: #d1d5db; border-radius: 2px; transition: background 0.15s; }
   .resize-handle:hover::before, .resize-handle.active::before { background: #3b82f6; }
   body.resizing * { user-select: none !important; cursor: row-resize !important; }
-  .json-content { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 11px; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 10px 14px; border-radius: 8px; max-height: 300px; overflow-y: auto; line-height: 1.5; }
+  .json-content { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 11px; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 10px 14px; border-radius: 8px; max-height: 560px; overflow-y: auto; line-height: 1.5; }
   .timeline-bar { transition: all 0.2s ease; cursor: pointer; min-width: 4px; }
   .timeline-bar:hover { filter: brightness(0.9); }
   .modal-overlay { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); }
@@ -37,9 +39,34 @@
   .thinking-section { background: #fefce8; border-left: 3px solid #eab308; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 12px; color: #a16207; }
   .thinking-section summary { cursor: pointer; font-weight: 600; font-size: 11px; color: #b45309; user-select: none; }
   .thinking-section summary:hover { color: #92400e; }
-  .thinking-content { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; max-height: 200px; overflow-y: auto; }
+  .thinking-content { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; max-height: 320px; overflow-y: auto; }
   .streaming-cursor::after { content: '|'; animation: blink 0.6s step-end infinite; color: #3b82f6; }
   @keyframes blink { 50% { opacity: 0; } }
+  .markdown-body { line-height: 1.55; word-break: break-word; }
+  .markdown-body > *:first-child { margin-top: 0; }
+  .markdown-body > *:last-child { margin-bottom: 0; }
+  .markdown-body h1 { font-size: 1.15rem; font-weight: 700; margin: 0.6em 0 0.3em; }
+  .markdown-body h2 { font-size: 1.05rem; font-weight: 700; margin: 0.55em 0 0.28em; }
+  .markdown-body h3 { font-size: 0.98rem; font-weight: 600; margin: 0.5em 0 0.25em; }
+  .markdown-body h4, .markdown-body h5, .markdown-body h6 { font-size: 0.9rem; font-weight: 600; margin: 0.45em 0 0.22em; }
+  .markdown-body p { margin: 0 0 0.5em; }
+  .markdown-body ul, .markdown-body ol { margin: 0.3em 0 0.5em; padding-left: 1.35em; }
+  .markdown-body ul { list-style: disc; }
+  .markdown-body ol { list-style: decimal; }
+  .markdown-body li { margin: 0.12em 0; }
+  .markdown-body li > p { margin: 0; }
+  .markdown-body code { background: rgba(15,23,42,0.08); padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.85em; font-family: 'SF Mono', 'Fira Code', Consolas, monospace; }
+  .markdown-body pre { background: #1e293b; color: #e2e8f0; padding: 8px 12px; border-radius: 6px; margin: 0.4em 0; overflow-x: auto; font-size: 11.5px; line-height: 1.45; }
+  .markdown-body pre code { background: transparent; padding: 0; font-size: inherit; color: inherit; }
+  .markdown-body strong { font-weight: 700; }
+  .markdown-body em { font-style: italic; }
+  .markdown-body a { color: #2563eb; text-decoration: underline; }
+  .markdown-body a:hover { color: #1d4ed8; }
+  .markdown-body blockquote { border-left: 3px solid #cbd5e1; padding: 0.1em 0.75em; color: #475569; margin: 0.4em 0; background: rgba(148,163,184,0.08); }
+  .markdown-body hr { margin: 0.7em 0; border: 0; border-top: 1px solid #e2e8f0; }
+  .markdown-body table { border-collapse: collapse; margin: 0.4em 0; font-size: 12px; }
+  .markdown-body th, .markdown-body td { border: 1px solid #e2e8f0; padding: 3px 8px; text-align: left; }
+  .markdown-body th { background: #f1f5f9; font-weight: 600; }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
@@ -103,7 +130,7 @@
   <header class="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0 z-10">
     <div class="flex items-center gap-3">
       <h1 class="text-lg font-bold text-gray-800">Meeting Flow</h1>
-      <span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">v0.3</span>
+      <span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">v0.4</span>
     </div>
     <div class="flex items-center gap-2">
       <button @click="loadDemo()" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Load Demo</button>
@@ -138,15 +165,21 @@
             <!-- Assistant message -->
             <div x-show="msg.role==='assistant'" class="flex justify-start">
               <div class="max-w-[90%] bg-gray-100 text-gray-800 rounded-2xl rounded-bl-md px-4 py-2 text-sm">
+                <!-- Tool call badge -->
+                <div x-show="msg.isToolCall" class="mb-1">
+                  <span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium"
+                    x-text="'🔧 ' + msg.toolCallName"></span>
+                </div>
                 <!-- Thinking process (collapsible) -->
                 <details x-show="msg.thinking" class="thinking-section" :open="msg.showThinking" @toggle="msg.showThinking=$el.open">
                   <summary>Thought Process</summary>
                   <div class="thinking-content" x-text="msg.thinking"></div>
                 </details>
-                <!-- Main content (plain text) -->
-                <div x-show="msg.content && !msg.isJson">
-                  <span x-text="msg.content" :class="{ 'streaming-cursor': msg.streaming }"></span>
-                </div>
+                <!-- Main content (markdown) -->
+                <div x-show="msg.content && !msg.isJson"
+                  class="markdown-body"
+                  :class="{ 'streaming-cursor': msg.streaming }"
+                  x-html="renderMarkdown(msg.content)"></div>
                 <!-- Main content (JSON with syntax highlighting) -->
                 <div x-show="msg.content && msg.isJson" class="json-content" x-html="highlightJson(msg.content)"></div>
                 <div x-show="!msg.content && !msg.thinking" class="flex items-center gap-2">
@@ -528,87 +561,98 @@ function meetingApp() {
       if (!text || this.loading) return;
       this.chatInput = "";
 
-      const isInitialParse = !this.meeting.segments.length;
       this.messages.push({ id: Date.now(), role: "user", content: text });
 
       const providerCfg = this.providers[this.activeProvider];
       if (!providerCfg || !providerCfg.apiKey) {
         this.messages.push({ id: Date.now() + 1, role: "assistant", content: "Please configure your API key in Settings first. Or click 'Load Demo' to see an example." });
-        this.scrollChat();
+        this.scrollChat(true);
         return;
       }
 
-      // Create a streaming assistant message placeholder
       const msgId = Date.now() + 1;
       const startTime = Date.now();
       const reqModel = providerCfg.model;
       const reqEffort = providerCfg.reasoningEffort || "high";
       const reqProvider = this.activeProvider;
       const reqThinking = effectiveThinking(reqProvider, providerCfg);
-      this.streamingMsg = { id: msgId, role: "assistant", content: "", thinking: "", showThinking: true, streaming: true, isJson: true };
+
+      // Single bubble reused by router and executor — badge + streaming JSON land on the same message.
+      this.streamingMsg = {
+        id: msgId, role: "assistant",
+        content: "", thinking: "", showThinking: true,
+        streaming: true, isJson: false
+      };
       this.messages.push(this.streamingMsg);
       this.loading = true;
-      this.scrollChat();
+      this.scrollChat(true);
 
-      // Abort previous request if any
       if (this.abortController) this.abortController.abort();
       this.abortController = new AbortController();
 
       try {
-        let fullResponse = "";
+        const onThinking = (chunk) => { this.streamingMsg.thinking += chunk; this.scrollChat(); };
+        const onContent = (chunk) => { this.streamingMsg.content += chunk; this.scrollChat(); };
 
-        const onThinking = (chunk) => {
-          this.streamingMsg.thinking += chunk;
-          this.scrollChat();
-        };
-        const onContent = (chunk) => {
-          this.streamingMsg.content += chunk;
-          this.scrollChat();
-        };
+        // Router: SYSTEM_PROMPT + full history (streamingMsg is streaming:true so it's filtered out of the payload).
+        const history = buildHistoryForProvider(this.messages, reqProvider);
+        const r1 = await this.callLLMStreaming(
+          SYSTEM_PROMPT, null, onThinking, onContent,
+          this.abortController.signal,
+          { includeTools: true, history }
+        );
 
-        if (isInitialParse) {
-          const userMsg = PLAN_MEETING_USER_PROMPT.replace("{text}", text);
-          const r = await this.callLLMStreaming(PLAN_MEETING_DEVELOPER_PROMPT, userMsg, onThinking, onContent, this.abortController.signal);
-          fullResponse = r.content;
+        if (r1.toolCalls && r1.toolCalls.length) {
+          for (let i = 0; i < r1.toolCalls.length; i++) {
+            const tc = r1.toolCalls[i];
+
+            // First tool call reuses the current streamingMsg; subsequent ones create fresh bubbles.
+            let bubble = this.streamingMsg;
+            if (i > 0) {
+              bubble = {
+                id: Date.now() + 100 + i, role: "assistant",
+                content: "", thinking: "", showThinking: true,
+                streaming: true, isJson: true
+              };
+              this.messages.push(bubble);
+              this.streamingMsg = bubble;
+              this.scrollChat(true);
+            }
+
+            // Attach tool_use metadata (consumed by buildHistoryForProvider on the next turn).
+            bubble.isToolCall = true;
+            bubble.toolCallId = tc.id;
+            bubble.toolCallName = tc.name;
+            bubble.toolCallArgs = tc.args;
+            bubble.thinkingBlocks = (i === 0 ? r1.thinkingBlocks : []) || [];
+            bubble.content = "";
+            bubble.isJson = true;
+
+            const toolResult = await this.executeToolCall(tc, onThinking, onContent);
+
+            this.messages.push({
+              id: Date.now() + 1000 + i,
+              role: "tool",
+              toolCallId: tc.id,
+              toolCallName: tc.name,
+              toolResult
+            });
+          }
         } else {
-          const currentJSON = JSON.stringify({ meta: this.meeting.meta, segments: this.meeting.segments.map(s => ({ type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker })) }, null, 2);
-          const userMsg = ADJUST_MEETING_USER_PROMPT.replace("{text}", text);
-          const r = await this.callLLMStreaming(ADJUST_MEETING_DEVELOPER_PROMPT + currentJSON, userMsg, onThinking, onContent, this.abortController.signal);
-          fullResponse = r.content;
+          // No tool call: parse JSON for backward compatibility, else plain chat.
+          const parsed = this.parseJSON(r1.content);
+          if (parsed && (parsed.segments || parsed.meta)) {
+            this.streamingMsg.isJson = true;
+            this.applyAgendaJSON(parsed);
+            this.streamingMsg.content = JSON.stringify(parsed, null, 2);
+          } else {
+            this.streamingMsg.isJson = false;
+          }
         }
 
         this.streamingMsg.streaming = false;
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + "s";
         this.streamingMsg.info = { provider: reqProvider, model: reqModel, effort: reqEffort, thinking: reqThinking, elapsed };
-
-        const parsed = this.parseJSON(fullResponse);
-        if (parsed) {
-          if (parsed.meta) {
-            // Normalize snake_case → camelCase
-            const m = parsed.meta;
-            this.meeting.meta = {
-              ...this.meeting.meta,
-              no: m.no ?? this.meeting.meta.no,
-              type: m.type ?? this.meeting.meta.type,
-              theme: m.theme ?? this.meeting.meta.theme,
-              manager: m.manager ?? this.meeting.meta.manager,
-              date: m.date ?? this.meeting.meta.date,
-              startTime: m.startTime || m.start_time || this.meeting.meta.startTime,
-              endTime: m.endTime || m.end_time || this.meeting.meta.endTime,
-              location: m.location ?? this.meeting.meta.location,
-              introduction: m.introduction ?? this.meeting.meta.introduction
-            };
-          }
-          if (parsed.segments) {
-            this.meeting.segments = parsed.segments.map((s, i) => this.enrichSegment(s, i));
-            this.recalculateTimes();
-          }
-          this.streamingMsg.segments = this.meeting.segments.length;
-          this.streamingMsg.content = JSON.stringify(parsed, null, 2);
-        } else if (!this.streamingMsg.content) {
-          this.streamingMsg.content = "Sorry, couldn't parse the response.";
-          this.streamingMsg.error = "Raw: " + fullResponse.substring(0, 200);
-        }
       } catch (e) {
         this.streamingMsg.streaming = false;
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + "s";
@@ -619,10 +663,95 @@ function meetingApp() {
           this.streamingMsg.content = this.streamingMsg.content || "Error occurred.";
           this.streamingMsg.error = e.message;
         }
+      } finally {
+        this.loading = false;
+        this.abortController = null;
+        this.scrollChat();
       }
-      this.loading = false;
-      this.abortController = null;
-      this.scrollChat();
+    },
+
+    async executeToolCall(tc, onThinking, onContent) {
+      // Executor path: legacy prompts, NO tools (the inner call just generates JSON).
+      // Streams into the same onThinking/onContent callbacks so the badge bubble shows live output.
+      try {
+        if (tc.name === "create_meeting") {
+          const userMsg = PLAN_MEETING_USER_PROMPT.replace("{text}", tc.args?.raw_text || "");
+          const r = await this.callLLMStreaming(
+            PLAN_MEETING_DEVELOPER_PROMPT, userMsg,
+            onThinking, onContent, this.abortController.signal,
+            { includeTools: false }
+          );
+          const parsed = this.parseJSON(r.content);
+          if (!parsed) return { success: false, error: "Executor output was not valid JSON" };
+          this.applyAgendaJSON(parsed);
+          return { success: true, summary: this.digestAgenda() };
+        }
+
+        if (tc.name === "adjust_meeting") {
+          const currentJSON = JSON.stringify({
+            meta: this.meeting.meta,
+            segments: this.meeting.segments.map(s => ({ type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker }))
+          }, null, 2);
+          const userMsg = ADJUST_MEETING_USER_PROMPT.replace("{text}", tc.args?.request || "");
+          const r = await this.callLLMStreaming(
+            ADJUST_MEETING_DEVELOPER_PROMPT + currentJSON, userMsg,
+            onThinking, onContent, this.abortController.signal,
+            { includeTools: false }
+          );
+          const parsed = this.parseJSON(r.content);
+          if (!parsed) return { success: false, error: "Executor output was not valid JSON" };
+          this.applyAgendaJSON(parsed);
+          return { success: true, summary: this.digestAgenda() };
+        }
+
+        return { success: false, error: "Unknown tool: " + tc.name };
+      } catch (e) {
+        if (e.name === "AbortError") throw e;
+        return { success: false, error: e.message || String(e) };
+      }
+    },
+
+    applyAgendaJSON(parsed) {
+      if (parsed.meta) {
+        const m = parsed.meta;
+        this.meeting.meta = {
+          ...this.meeting.meta,
+          no: m.no ?? this.meeting.meta.no,
+          type: m.type ?? this.meeting.meta.type,
+          theme: m.theme ?? this.meeting.meta.theme,
+          manager: m.manager ?? this.meeting.meta.manager,
+          date: m.date ?? this.meeting.meta.date,
+          startTime: m.startTime || m.start_time || this.meeting.meta.startTime,
+          endTime: m.endTime || m.end_time || this.meeting.meta.endTime,
+          location: m.location ?? this.meeting.meta.location,
+          introduction: m.introduction ?? this.meeting.meta.introduction
+        };
+      }
+      if (Array.isArray(parsed.segments)) {
+        this.meeting.segments = parsed.segments.map((s, i) => this.enrichSegment(s, i));
+        this.recalculateTimes();
+      }
+      if (this.streamingMsg) this.streamingMsg.segments = this.meeting.segments.length;
+    },
+
+    digestAgenda() {
+      // Compact snapshot returned to the router as tool_result — enough context for the
+      // next turn's adjustments without dumping the whole JSON.
+      const roles = {};
+      for (const seg of this.meeting.segments) {
+        if (seg.roleTaker && seg.roleTaker !== "All" && seg.roleTaker !== "") {
+          roles[seg.type] = seg.roleTaker;
+        }
+      }
+      return {
+        no: this.meeting.meta.no,
+        theme: this.meeting.meta.theme,
+        type: this.meeting.meta.type,
+        start_time: this.meeting.meta.startTime,
+        end_time: this.meeting.meta.endTime,
+        segment_count: this.meeting.segments.length,
+        roles
+      };
     },
 
     enrichSegment(s, idx) {
@@ -845,10 +974,16 @@ function meetingApp() {
       return data.content[0].text;
     },
 
-    scrollChat() {
+    scrollChat(force = false) {
+      // force=true always snaps to bottom (use for user-initiated events).
+      // Otherwise only auto-follow when the user is already near the bottom
+      // — so scrolling up mid-stream doesn't get yanked back.
       this.$nextTick(() => {
         const el = this.$refs.chatContainer;
-        if (el) el.scrollTop = el.scrollHeight;
+        if (!el) return;
+        if (force) { el.scrollTop = el.scrollHeight; return; }
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (distanceFromBottom < 80) el.scrollTop = el.scrollHeight;
       });
     },
 
@@ -858,6 +993,20 @@ function meetingApp() {
         this.abortController = null;
       }
       this.loading = false;
+    },
+
+    renderMarkdown(content) {
+      if (!content) return "";
+      if (typeof marked === "undefined") {
+        // Library not loaded yet — fall back to escaped plain text so we never inject raw HTML.
+        return content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+      try {
+        const html = marked.parse(content, { breaks: true, gfm: true });
+        return typeof DOMPurify !== "undefined" ? DOMPurify.sanitize(html) : html;
+      } catch (e) {
+        return content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
     },
 
     highlightJson(content) {
