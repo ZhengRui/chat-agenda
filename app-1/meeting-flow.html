@@ -69,6 +69,20 @@
           </select>
           <input x-show="cfg.model === '__custom__' && name !== 'deepseek'" x-model="cfg._customModel" @input="cfg.model = $el.value" placeholder="Enter custom model name..."
             class="w-full border rounded-lg px-3 py-2 mt-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+          <label class="block text-xs font-medium text-gray-500 mb-1 mt-3">Reasoning effort</label>
+          <select x-show="name === 'deepseek'" x-model="cfg.reasoningEffort"
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+            <option value="high">high</option>
+            <option value="max">max</option>
+          </select>
+          <select x-show="name !== 'deepseek'" x-model="cfg.reasoningEffort"
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
+            <option value="max">max</option>
+          </select>
           <button @click="testConnection(name)" :disabled="!cfg.apiKey || testing"
             class="mt-3 w-full px-2 py-1.5 rounded-lg text-xs font-medium transition disabled:opacity-40 disabled:cursor-not-allowed"
             :class="testResults[name] === 'ok' ? 'bg-green-100 text-green-700' : (testResults[name] === 'fail' ? 'bg-red-100 text-red-500' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')">
@@ -171,6 +185,23 @@
             @input="providers[activeProvider].model = $el.value"
             placeholder="Custom model..."
             class="text-xs border rounded-md px-2 py-1 flex-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+          <select x-show="activeProvider === 'deepseek'"
+            x-model="providers[activeProvider].reasoningEffort"
+            title="Reasoning effort"
+            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+            <option value="high">high</option>
+            <option value="max">max</option>
+          </select>
+          <select x-show="activeProvider !== 'deepseek'"
+            x-model="providers[activeProvider].reasoningEffort"
+            title="Reasoning effort"
+            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
+            <option value="max">max</option>
+          </select>
         </div>
         <div class="flex gap-2 flex-1">
           <textarea x-model="chatInput" @keydown.enter.prevent="handleEnter($event)"
@@ -341,24 +372,28 @@ function meetingApp() {
         apiKey: "",
         baseUrl: localStorage.getItem("mf_ds_baseUrl") || "https://api.deepseek.com",
         model: localStorage.getItem("mf_ds_model") || "model1",
+        reasoningEffort: localStorage.getItem("mf_ds_effort") || "max",
         presetModels: ["model1"]
       },
       openai: {
         apiKey: "",
         baseUrl: localStorage.getItem("mf_oai_baseUrl") || "https://api.openai.com",
         model: localStorage.getItem("mf_oai_model") || "gpt-5.4-nano",
+        reasoningEffort: localStorage.getItem("mf_oai_effort") || "high",
         presetModels: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "o3", "o3-mini", "o4-mini"]
       },
       anthropic: {
         apiKey: "",
         baseUrl: localStorage.getItem("mf_anth_baseUrl") || "https://api.anthropic.com",
         model: localStorage.getItem("mf_anth_model") || "claude-haiku-4-5",
+        reasoningEffort: localStorage.getItem("mf_anth_effort") || "high",
         presetModels: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
       },
       gemini: {
         apiKey: "",
         baseUrl: localStorage.getItem("mf_gem_baseUrl") || "https://generativelanguage.googleapis.com/v1beta",
         model: localStorage.getItem("mf_gem_model") || "gemini-2.5-flash-lite",
+        reasoningEffort: localStorage.getItem("mf_gem_effort") || "high",
         presetModels: ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash-lite", "gemini-3-deep-think"]
       }
     },
@@ -562,7 +597,79 @@ function meetingApp() {
     },
 
     isReasoningModel(model) {
-      return /^o[1-9]/.test(model);
+      // OpenAI models that accept `reasoning_effort` (and forbid `temperature` when effort > none).
+      return /^o[1-9]/.test(model) || /^gpt-5/.test(model);
+    },
+
+    anthropicUsesAdaptive(model) {
+      // Models where `thinking.type: "adaptive"` is required (opus-4-7) or preferred (opus-4-6, sonnet-4-6).
+      return /^(claude-opus-4-7|claude-opus-4-6|claude-sonnet-4-6|claude-mythos)/.test(model);
+    },
+
+    anthropicBudget(effort) {
+      // Maps effort → budget_tokens for `thinking.type: "enabled"` (haiku-4-5 and older).
+      return ({ low: 1024, medium: 4096, high: 8192, xhigh: 12000, max: 14000 })[effort] || 8192;
+    },
+
+    geminiUses3x(model) {
+      return /^gemini-3/.test(model);
+    },
+
+    geminiLevel(effort) {
+      // Gemini 3.x `thinkingLevel` caps at "high"; maps xhigh/max down.
+      return ({ low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" })[effort] || "high";
+    },
+
+    geminiBudget(effort) {
+      // Gemini 2.5 `thinkingBudget` in tokens; -1 = dynamic (near-max).
+      return ({ low: 2048, medium: 8192, high: 16384, xhigh: -1, max: -1 })[effort] ?? 16384;
+    },
+
+    buildOpenAIBody(cfg, messages, stream) {
+      const body = { model: cfg.model, messages };
+      if (stream) body.stream = true;
+      if (this.activeProvider === 'deepseek') {
+        body.thinking = { type: "enabled" };
+        body.reasoning_effort = cfg.reasoningEffort || "max";
+        body.temperature = 0.3;
+        return body;
+      }
+      body.max_completion_tokens = 16384;
+      const effort = cfg.reasoningEffort || "high";
+      if (this.isReasoningModel(cfg.model) && effort !== "none") {
+        // gpt-5.x / o-series: reasoning_effort > none forbids temperature/top_p/logprobs.
+        body.reasoning_effort = effort === "max" ? "xhigh" : effort;
+      } else {
+        body.temperature = 0.3;
+      }
+      return body;
+    },
+
+    buildAnthropicBody(cfg, systemPrompt, messages, stream) {
+      const effort = cfg.reasoningEffort || "high";
+      const body = { model: cfg.model, system: systemPrompt, messages, max_tokens: 16384 };
+      if (stream) body.stream = true;
+      if (this.anthropicUsesAdaptive(cfg.model)) {
+        body.thinking = { type: "adaptive" };
+        body.output_config = { effort };
+      } else {
+        body.thinking = { type: "enabled", budget_tokens: this.anthropicBudget(effort) };
+      }
+      // temperature/top_p/top_k must be left at defaults when thinking is active — omit them.
+      return body;
+    },
+
+    buildGeminiBody(cfg, systemPrompt, contents) {
+      const effort = cfg.reasoningEffort || "high";
+      const thinkingConfig = { includeThoughts: true };
+      if (this.geminiUses3x(cfg.model)) thinkingConfig.thinkingLevel = this.geminiLevel(effort);
+      else thinkingConfig.thinkingBudget = this.geminiBudget(effort);
+      return {
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        // temperature omitted for parity with OpenAI/Anthropic reasoning paths (both forbid it when thinking is on).
+        generationConfig: { maxOutputTokens: 16384, thinkingConfig }
+      };
     },
 
     syncSelect(el, cfg) {
@@ -597,10 +704,11 @@ function meetingApp() {
       const messages = [{ role: "system", content: systemPrompt }];
       messages.push({ role: "user", content: userMessage || "Please generate the output." });
 
+      const body = this.buildOpenAIBody(cfg, messages, true);
       const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.apiKey },
-        body: JSON.stringify({ model: cfg.model, messages, ...(this.isReasoningModel(cfg.model) ? {} : { temperature: 0.3 }), max_completion_tokens: 4096, stream: true }),
+        body: JSON.stringify(body),
         signal
       });
       if (!res.ok) throw new Error("API error: " + res.status + " " + (await res.text()).substring(0, 200));
@@ -660,10 +768,11 @@ function meetingApp() {
         msgs.push({ role: "user", content: "Please process the request." });
       }
 
+      const body = this.buildAnthropicBody(cfg, systemPrompt, msgs, true);
       const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: cfg.model, system: systemPrompt, messages: msgs, temperature: 0.3, max_tokens: 4096, stream: true }),
+        body: JSON.stringify(body),
         signal
       });
       if (!res.ok) throw new Error("API error: " + res.status + " " + (await res.text()).substring(0, 200));
@@ -714,11 +823,7 @@ function meetingApp() {
         contents.push({ role: "user", parts: [{ text: "Please process the request." }] });
       }
 
-      const body = {
-        system_instruction: { parts: { text: systemPrompt } },
-        contents,
-        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
-      };
+      const body = this.buildGeminiBody(cfg, systemPrompt, contents);
 
       const url = cfg.baseUrl.replace(/\/$/, "") + "/models/" + cfg.model + ":streamGenerateContent?alt=sse&key=" + encodeURIComponent(cfg.apiKey);
       const res = await fetch(url, {
@@ -772,11 +877,7 @@ function meetingApp() {
         contents.push({ role: "user", parts: [{ text: "Please process the request." }] });
       }
 
-      const body = {
-        system_instruction: { parts: { text: systemPrompt } },
-        contents,
-        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 }
-      };
+      const body = this.buildGeminiBody(cfg, systemPrompt, contents);
 
       const url = cfg.baseUrl.replace(/\/$/, "") + "/models/" + cfg.model + ":generateContent?key=" + encodeURIComponent(cfg.apiKey);
       const res = await fetch(url, {
@@ -804,10 +905,11 @@ function meetingApp() {
       const messages = [{ role: "system", content: systemPrompt }];
       if (userMessage) messages.push({ role: "user", content: userMessage });
 
+      const body = this.buildOpenAIBody(cfg, messages, false);
       const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.apiKey },
-        body: JSON.stringify({ model: cfg.model, messages, ...(this.isReasoningModel(cfg.model) ? {} : { temperature: 0.3 }), max_completion_tokens: 4096 })
+        body: JSON.stringify(body)
       });
       if (!res.ok) throw new Error("API error: " + res.status + " " + (await res.text()).substring(0, 200));
       const data = await res.json();
@@ -820,10 +922,11 @@ function meetingApp() {
       if (userMessage) messages.push({ role: "user", content: userMessage });
       else messages.push({ role: "user", content: "Please process the request." });
 
+      const body = this.buildAnthropicBody(cfg, systemPrompt, messages, false);
       const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: cfg.model, system: systemPrompt, messages, temperature: 0.3, max_tokens: 4096 })
+        body: JSON.stringify(body)
       });
       if (!res.ok) throw new Error("API error: " + res.status + " " + (await res.text()).substring(0, 200));
       const data = await res.json();
@@ -917,6 +1020,7 @@ function meetingApp() {
         const p = prefix[name];
         localStorage.setItem(p + "_baseUrl", cfg.baseUrl);
         localStorage.setItem(p + "_model", cfg.model);
+        if (cfg.reasoningEffort) localStorage.setItem(p + "_effort", cfg.reasoningEffort);
         if (cfg.apiKey) localStorage.setItem("mf_" + name + "_key", cfg.apiKey);
       });
       localStorage.setItem("mf_activeProvider", this.activeProvider);
@@ -955,6 +1059,7 @@ function meetingApp() {
       const cfg = this.providers[name];
       localStorage.setItem(p + "_baseUrl", cfg.baseUrl);
       localStorage.setItem(p + "_model", cfg.model);
+      if (cfg.reasoningEffort) localStorage.setItem(p + "_effort", cfg.reasoningEffort);
       if (cfg.apiKey) localStorage.setItem("mf_" + name + "_key", cfg.apiKey);
     },
 
