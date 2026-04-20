@@ -44,6 +44,12 @@
   @keyframes blink { 50% { opacity: 0; } }
   .drop-line { position: absolute; left: 6px; right: 6px; height: 2px; background: #3b82f6; border-radius: 1px; box-shadow: 0 0 6px rgba(59,130,246,0.55); pointer-events: none; z-index: 10; margin-top: -1px; }
   #segmentList { position: relative; }
+  @keyframes card-flash {
+    0%   { box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    15%  { box-shadow: 0 0 0 3px rgba(59,130,246,0.55), 0 0 12px rgba(59,130,246,0.35); }
+    100% { box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+  }
+  .segment-card.card-flash { animation: card-flash 800ms ease-out; }
   .markdown-body { line-height: 1.55; word-break: break-word; }
   .markdown-body > *:first-child { margin-top: 0; }
   .markdown-body > *:last-child { margin-bottom: 0; }
@@ -912,7 +918,7 @@ function meetingApp() {
           );
           const parsed = this.parseJSON(r.content);
           if (!parsed) return { success: false, error: "Executor output was not valid JSON" };
-          this.applyAgendaJSON(parsed);
+          this.applyAgendaJSON(parsed);                                // create_meeting: no animation
           return { success: true, agenda: this.fullAgendaSnapshot() };
         }
 
@@ -931,7 +937,7 @@ function meetingApp() {
           );
           const parsed = this.parseJSON(r.content);
           if (!parsed) return { success: false, error: "Executor output was not valid JSON" };
-          this.applyAgendaJSON(parsed);
+          this.applyAgendaJSON(parsed, { animate: true });             // adjust_meeting: FLIP + flash + fade
           return { success: true, agenda: this.fullAgendaSnapshot() };
         }
 
@@ -942,11 +948,10 @@ function meetingApp() {
       }
     },
 
-    applyAgendaJSON(parsed) {
+    applyAgendaJSON(parsed, opts = {}) {
       if (!parsed) return;
-      // The create_meeting prompt examples emit flat JSON (meta fields at top level),
-      // while adjust_meeting / fullAgendaSnapshot use a wrapped { meta, segments } shape.
-      // Accept either: fall back to parsed itself when there's no meta wrapper.
+      // opts.animate=true triggers FLIP (moved) / fade-in (added) / fade-out (removed) /
+      // flash (content-changed) transitions. Used by adjust_meeting; create_meeting stays instant.
       const m = parsed.meta || parsed;
       this.meeting.meta = {
         ...this.meeting.meta,
@@ -960,18 +965,149 @@ function meetingApp() {
         location: m.location ?? this.meeting.meta.location,
         introduction: m.introduction ?? this.meeting.meta.introduction
       };
-      if (Array.isArray(parsed.segments)) {
-        // Defensive: drop any segment whose type is a buffer/gap placeholder — buffers are
-        // modelled as time gaps between real segments, never as segments themselves.
-        const realSegments = parsed.segments.filter(s => {
-          const t = (s.type || "").toLowerCase().trim();
-          return t && t !== "buffer" && t !== "gap" && t !== "间隔" && t !== "空档" && t !== "pause" && t !== "break time";
-        });
+      if (!Array.isArray(parsed.segments)) {
+        if (this.streamingMsg) this.streamingMsg.segments = this.meeting.segments.length;
+        return;
+      }
+      // Defensive: drop any segment whose type is a buffer/gap placeholder.
+      const realSegments = parsed.segments.filter(s => {
+        const t = (s.type || "").toLowerCase().trim();
+        return t && t !== "buffer" && t !== "gap" && t !== "间隔" && t !== "空档" && t !== "pause" && t !== "break time";
+      });
+
+      if (!opts.animate) {
         this.meeting.segments = realSegments.map((s, i) => this.enrichSegment(s, i));
         this.deriveBuffers();
         this.refreshDerivedState();
+        if (this.streamingMsg) this.streamingMsg.segments = this.meeting.segments.length;
+        return;
       }
+
+      // --- Animated path ---
+      const segmentListEl = document.getElementById("segmentList");
+      const oldSegs = this.meeting.segments.slice();
+
+      // 1. Capture old positions (by seg.id, using offsetTop — segmentList is position:relative).
+      const oldPos = new Map();
+      if (segmentListEl) {
+        for (const card of segmentListEl.querySelectorAll(".segment-card[data-seg-id]")) {
+          oldPos.set(card.dataset.segId, {
+            top: card.offsetTop, left: card.offsetLeft,
+            width: card.offsetWidth, height: card.offsetHeight
+          });
+        }
+      }
+
+      // 2. Position-tolerant match: same type matched in order. Matched new segs inherit old id.
+      const buckets = new Map();
+      for (const o of oldSegs) {
+        if (!buckets.has(o.type)) buckets.set(o.type, []);
+        buckets.get(o.type).push(o);
+      }
+      const matchedOldIds = new Set();
+      const flashIds = new Set();
+      const newIds = new Set();
+      const newEnriched = realSegments.map((s, i) => {
+        const enriched = this.enrichSegment(s, i);
+        const bucket = buckets.get(s.type);
+        if (bucket && bucket.length) {
+          const matched = bucket.shift();
+          enriched.id = matched.id;
+          matchedOldIds.add(matched.id);
+          const changed = (matched.roleTaker || "") !== (enriched.roleTaker || "")
+                       || (matched.duration || 0) !== (enriched.duration || 0);
+          if (changed) flashIds.add(matched.id);
+        } else {
+          newIds.add(enriched.id);
+        }
+        return enriched;
+      });
+      const removedSegs = oldSegs.filter(o => !matchedOldIds.has(o.id));
+
+      // 3. Clone removed cards into segmentList overlay so Alpine can remove the originals
+      //    while visuals keep showing — fade-out starts in $nextTick.
+      const fadeClones = [];
+      if (segmentListEl) {
+        for (const r of removedSegs) {
+          const pos = oldPos.get(r.id);
+          const original = segmentListEl.querySelector('.segment-card[data-seg-id="' + r.id + '"]');
+          if (!pos || !original) continue;
+          const clone = original.cloneNode(true);
+          // Strip Alpine bindings so the detached clone doesn't fight reactivity.
+          const strip = (node) => {
+            if (node.nodeType !== 1) return;
+            for (const a of Array.from(node.attributes)) {
+              const n = a.name;
+              if (n.startsWith("x-") || n.startsWith(":") || n.startsWith("@")) node.removeAttribute(n);
+            }
+            for (const c of Array.from(node.children)) strip(c);
+          };
+          strip(clone);
+          Object.assign(clone.style, {
+            position: "absolute",
+            top: pos.top + "px", left: pos.left + "px",
+            width: pos.width + "px",
+            zIndex: "2", pointerEvents: "none", margin: "0"
+          });
+          segmentListEl.appendChild(clone);
+          fadeClones.push(clone);
+        }
+      }
+
+      // 4. Apply new segments — Alpine will diff against reused ids, keeping matched DOM nodes.
+      this.meeting.segments = newEnriched;
+      this.deriveBuffers();
+      this.refreshDerivedState();
       if (this.streamingMsg) this.streamingMsg.segments = this.meeting.segments.length;
+
+      // 5. After Alpine rerender: FLIP moved cards, fade-in new cards, flash changed cards,
+      //    trigger fade-out on clones.
+      this.$nextTick(() => {
+        const cards = segmentListEl ? segmentListEl.querySelectorAll(".segment-card[data-seg-id]") : [];
+        for (const card of cards) {
+          const id = card.dataset.segId;
+          if (newIds.has(id)) {
+            // Fade-in: start hidden + slightly offset, then release to normal.
+            card.style.transition = "none";
+            card.style.opacity = "0";
+            card.style.transform = "translateY(-10px)";
+            card.offsetHeight;
+            card.style.transition = "opacity 800ms ease, transform 800ms ease";
+            card.style.opacity = "";
+            card.style.transform = "";
+          } else {
+            const op = oldPos.get(id);
+            if (op) {
+              const dy = op.top - card.offsetTop;
+              if (Math.abs(dy) >= 1) {
+                card.style.transition = "none";
+                card.style.transform = "translateY(" + dy + "px)";
+                card.offsetHeight;
+                card.style.transition = "transform 800ms cubic-bezier(.2,.7,.3,1)";
+                card.style.transform = "";
+              }
+            }
+          }
+          if (flashIds.has(id)) {
+            card.classList.remove("card-flash");
+            void card.offsetWidth;                                  // restart animation
+            card.classList.add("card-flash");
+          }
+        }
+        // Clone fade-out: trigger inside nextTick so originals are already removed by Alpine.
+        for (const clone of fadeClones) {
+          clone.style.transition = "opacity 800ms ease, transform 800ms ease";
+          clone.style.opacity = "0";
+          clone.style.transform = "translateY(10px)";
+        }
+        setTimeout(() => {
+          for (const card of cards) {
+            card.style.transition = ""; card.style.transform = ""; card.style.opacity = "";
+            card.classList.remove("card-flash");
+          }
+          for (const clone of fadeClones) clone.remove();
+        }, 850);
+      });
     },
 
     fullAgendaSnapshot() {
