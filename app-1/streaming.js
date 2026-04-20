@@ -1,0 +1,174 @@
+// ============================================================
+// SSE parsing and tool_call / thinking_block accumulation.
+// Pure functions — no DOM, no fetch. Browser scripts and Node
+// tests both load this file directly.
+// ============================================================
+
+// Split an SSE buffer into parsed `data:` JSON events plus any
+// trailing partial line. Caller feeds the remainder back in next round.
+// Non-JSON lines, comments, and [DONE] markers are skipped silently.
+function parseSseLines(buffer) {
+  const lines = buffer.split("\n");
+  const remainder = lines.pop() || "";
+  const events = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.startsWith("data: ")) continue;
+    const data = trimmed.slice(6);
+    if (data === "[DONE]") continue;
+    try { events.push(JSON.parse(data)); } catch (_) { /* skip malformed */ }
+  }
+  return { events, remainder };
+}
+
+// ---- OpenAI / DeepSeek ----
+
+function createOpenAIState() {
+  return { content: "", toolCallsByIndex: new Map(), thinkingBlocks: [] };
+}
+
+function handleOpenAIChunk(state, chunk, onThinking, onContent) {
+  const delta = chunk.choices?.[0]?.delta;
+  if (!delta) return;
+  if (delta.reasoning_content) onThinking(delta.reasoning_content);
+  if (delta.reasoning) onThinking(delta.reasoning);
+  if (delta.content) {
+    state.content += delta.content;
+    onContent(delta.content);
+  }
+  if (Array.isArray(delta.tool_calls)) {
+    for (const tc of delta.tool_calls) {
+      const idx = tc.index ?? 0;
+      let acc = state.toolCallsByIndex.get(idx);
+      if (!acc) {
+        acc = { id: "", name: "", argsStr: "" };
+        state.toolCallsByIndex.set(idx, acc);
+      }
+      if (tc.id) acc.id = tc.id;
+      if (tc.function?.name) acc.name = tc.function.name;
+      if (tc.function?.arguments) acc.argsStr += tc.function.arguments;
+    }
+  }
+}
+
+function finalizeOpenAIState(state) {
+  const toolCalls = [];
+  const keys = [...state.toolCallsByIndex.keys()].sort((a, b) => a - b);
+  for (const k of keys) {
+    const acc = state.toolCallsByIndex.get(k);
+    let args = {};
+    if (acc.argsStr) {
+      try { args = JSON.parse(acc.argsStr); }
+      catch (e) { args = { __parseError: e.message, __raw: acc.argsStr }; }
+    }
+    toolCalls.push({ id: acc.id, name: acc.name, args });
+  }
+  return { content: state.content, toolCalls, thinkingBlocks: state.thinkingBlocks };
+}
+
+// ---- Anthropic ----
+// Events stream: content_block_start / content_block_delta / content_block_stop.
+// Blocks can be of type "thinking", "text", or "tool_use", keyed by index.
+
+function createAnthropicState() {
+  return { content: "", blocks: {}, thinkingBlocks: [], toolCalls: [] };
+}
+
+function handleAnthropicEvent(state, event, onThinking, onContent) {
+  const idx = event.index ?? 0;
+  if (event.type === "content_block_start") {
+    const b = event.content_block || {};
+    if (b.type === "thinking") {
+      state.blocks[idx] = { type: "thinking", thinking: b.thinking || "", signature: "" };
+      if (b.thinking) onThinking(b.thinking);
+    } else if (b.type === "tool_use") {
+      state.blocks[idx] = { type: "tool_use", id: b.id || "", name: b.name || "", argsStr: "" };
+    } else if (b.type === "text") {
+      state.blocks[idx] = { type: "text", text: b.text || "" };
+      if (b.text) { state.content += b.text; onContent(b.text); }
+    }
+    return;
+  }
+  if (event.type === "content_block_delta") {
+    const block = state.blocks[idx];
+    if (!block) return;
+    const d = event.delta || {};
+    if (d.type === "thinking_delta" && block.type === "thinking") {
+      block.thinking += d.thinking || "";
+      if (d.thinking) onThinking(d.thinking);
+    } else if (d.type === "signature_delta" && block.type === "thinking") {
+      block.signature += d.signature || "";
+    } else if (d.type === "input_json_delta" && block.type === "tool_use") {
+      block.argsStr += d.partial_json || "";
+    } else if (d.type === "text_delta" && block.type === "text") {
+      block.text += d.text || "";
+      if (d.text) { state.content += d.text; onContent(d.text); }
+    }
+    return;
+  }
+  if (event.type === "content_block_stop") {
+    const block = state.blocks[idx];
+    if (!block) return;
+    if (block.type === "thinking") {
+      state.thinkingBlocks.push({ thinking: block.thinking, signature: block.signature });
+    } else if (block.type === "tool_use") {
+      let args = {};
+      if (block.argsStr) {
+        try { args = JSON.parse(block.argsStr); }
+        catch (e) { args = { __parseError: e.message, __raw: block.argsStr }; }
+      }
+      state.toolCalls.push({ id: block.id, name: block.name, args });
+    }
+  }
+}
+
+function finalizeAnthropicState(state) {
+  return { content: state.content, toolCalls: state.toolCalls, thinkingBlocks: state.thinkingBlocks };
+}
+
+// ---- Gemini ----
+// Parts arrive inside candidates[0].content.parts. `functionCall` may appear
+// once or split across multiple chunks; merge by name.
+
+function createGeminiState() {
+  return {
+    content: "",
+    thinkingBlocks: [],
+    toolCallsByName: new Map(),
+    _toolCallOrder: []
+  };
+}
+
+function handleGeminiChunk(state, chunk, onThinking, onContent) {
+  const parts = chunk.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return;
+  for (const part of parts) {
+    if (part.thought && part.text) {
+      onThinking(part.text);
+      // Gemini thought summaries carry no signature, so don't push into thinkingBlocks.
+    } else if (part.text && !part.thought) {
+      state.content += part.text;
+      onContent(part.text);
+    } else if (part.functionCall) {
+      const name = part.functionCall.name;
+      let acc = state.toolCallsByName.get(name);
+      if (!acc) {
+        acc = {
+          id: "gemini_" + Date.now() + "_" + state._toolCallOrder.length,
+          name,
+          args: {}
+        };
+        state.toolCallsByName.set(name, acc);
+        state._toolCallOrder.push(name);
+      }
+      if (part.functionCall.args && typeof part.functionCall.args === "object") {
+        Object.assign(acc.args, part.functionCall.args);
+      }
+    }
+  }
+}
+
+function finalizeGeminiState(state) {
+  const toolCalls = state._toolCallOrder.map(n => state.toolCallsByName.get(n));
+  return { content: state.content, toolCalls, thinkingBlocks: state.thinkingBlocks };
+}

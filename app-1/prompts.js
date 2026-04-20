@@ -2,6 +2,22 @@
 // Prompts for Toastmasters Meeting Agenda Generation
 // ============================================================
 
+// ---- Router system prompt (used with tool calling) ----
+
+const SYSTEM_PROMPT = `You are a Toastmasters meeting planning assistant.
+
+You have two tools:
+- create_meeting: call ONLY when the user pastes raw registration text. Registration text looks like WeChat content — emojis such as 📅 ⏰ 📍 👧, a date, a theme, a location, and role assignments like "TOM: Rui" / "SAA: Joyce" / "PS1: Frank". Pass the full pasted text as raw_text.
+- adjust_meeting: call ONLY when the user asks to modify an EXISTING agenda (swap roles, change durations, add or remove segments). Pass the user's request verbatim as request.
+
+Do NOT call any tool when:
+- The user is chit-chatting ("hello", "thanks", "cool").
+- The user is asking a question about the existing agenda ("who is taking TOM?", "when does tea break start?") — answer directly from the conversation.
+- No agenda exists yet and the message is clearly not registration text.
+
+For non-tool cases, reply in plain text, concise (1-3 sentences).
+`;
+
 const CLUB_MEMBERS = [
   "Rui Zheng", "Joyce Feng", "Leta Li", "Frank Zeng", "Max Long", "Julia Cao",
   "Jessica Peng", "Amy Fang", "Jenny Li", "Alice Song", "Jean Li", "Helen Chen",

@@ -9,6 +9,9 @@
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.x.x/Sortable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.x.x/dist/html2canvas.min.js"></script>
 <script src="prompts.js"></script>
+<script src="tools.js"></script>
+<script src="builders.js"></script>
+<script src="streaming.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/json.min.js"></script>
@@ -563,11 +566,13 @@ function meetingApp() {
 
         if (isInitialParse) {
           const userMsg = PLAN_MEETING_USER_PROMPT.replace("{text}", text);
-          fullResponse = await this.callLLMStreaming(PLAN_MEETING_DEVELOPER_PROMPT, userMsg, onThinking, onContent, this.abortController.signal);
+          const r = await this.callLLMStreaming(PLAN_MEETING_DEVELOPER_PROMPT, userMsg, onThinking, onContent, this.abortController.signal);
+          fullResponse = r.content;
         } else {
           const currentJSON = JSON.stringify({ meta: this.meeting.meta, segments: this.meeting.segments.map(s => ({ type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker })) }, null, 2);
           const userMsg = ADJUST_MEETING_USER_PROMPT.replace("{text}", text);
-          fullResponse = await this.callLLMStreaming(ADJUST_MEETING_DEVELOPER_PROMPT + currentJSON, userMsg, onThinking, onContent, this.abortController.signal);
+          const r = await this.callLLMStreaming(ADJUST_MEETING_DEVELOPER_PROMPT + currentJSON, userMsg, onThinking, onContent, this.abortController.signal);
+          fullResponse = r.content;
         }
 
         this.streamingMsg.streaming = false;
@@ -632,115 +637,6 @@ function meetingApp() {
       };
     },
 
-    isReasoningModel(model) {
-      // OpenAI models that accept `reasoning_effort` (and forbid `temperature` when effort > none).
-      return /^o[1-9]/.test(model) || /^gpt-5/.test(model);
-    },
-
-    mustThink(provider, model) {
-      // Models that cannot have thinking turned off — the toggle is forced on for these.
-      if (provider === 'openai') return /^o[1-9]/.test(model);            // o-series: no reasoning_effort:"none"
-      if (provider === 'anthropic') return /^claude-mythos/.test(model);  // Mythos rejects type:"disabled"
-      if (provider === 'gemini') return /^gemini-3\.1-pro/.test(model) || /^gemini-3-deep-think/.test(model);
-      return false;
-    },
-
-    effectiveThinking(provider, cfg) {
-      return this.mustThink(provider, cfg.model) || cfg.thinkingEnabled !== false;
-    },
-
-    anthropicUsesAdaptive(model) {
-      // Models where `thinking.type: "adaptive"` is required (opus-4-7) or preferred (opus-4-6, sonnet-4-6).
-      return /^(claude-opus-4-7|claude-opus-4-6|claude-sonnet-4-6|claude-mythos)/.test(model);
-    },
-
-    anthropicBudget(effort) {
-      // Maps effort → budget_tokens for `thinking.type: "enabled"` (haiku-4-5 and older).
-      return ({ low: 1024, medium: 4096, high: 8192, xhigh: 12000, max: 14000 })[effort] || 8192;
-    },
-
-    geminiUses3x(model) {
-      return /^gemini-3/.test(model);
-    },
-
-    geminiLevel(effort) {
-      // Gemini 3.x `thinkingLevel` caps at "high"; maps xhigh/max down.
-      return ({ low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" })[effort] || "high";
-    },
-
-    geminiBudget(effort) {
-      // Gemini 2.5 `thinkingBudget` in tokens; -1 = dynamic (near-max).
-      return ({ low: 2048, medium: 8192, high: 16384, xhigh: -1, max: -1 })[effort] ?? 16384;
-    },
-
-    buildOpenAIBody(cfg, messages, stream) {
-      const body = { model: cfg.model, messages };
-      if (stream) body.stream = true;
-      const thinking = this.effectiveThinking(this.activeProvider, cfg);
-      if (this.activeProvider === 'deepseek') {
-        if (thinking) {
-          body.thinking = { type: "enabled" };
-          body.reasoning_effort = cfg.reasoningEffort || "max";
-        }
-        body.temperature = 0.3;
-        return body;
-      }
-      body.max_completion_tokens = 16384;
-      const effort = cfg.reasoningEffort || "high";
-      if (thinking && this.isReasoningModel(cfg.model) && effort !== "none") {
-        // gpt-5.x / o-series: reasoning_effort > none forbids temperature/top_p/logprobs.
-        body.reasoning_effort = effort === "max" ? "xhigh" : effort;
-      } else {
-        if (thinking === false && this.isReasoningModel(cfg.model)) body.reasoning_effort = "none";
-        body.temperature = 0.3;
-      }
-      return body;
-    },
-
-    buildAnthropicBody(cfg, systemPrompt, messages, stream) {
-      const effort = cfg.reasoningEffort || "high";
-      const thinking = this.effectiveThinking('anthropic', cfg);
-      const body = { model: cfg.model, system: systemPrompt, messages, max_tokens: 16384 };
-      if (stream) body.stream = true;
-      if (!thinking) {
-        body.thinking = { type: "disabled" };
-        body.temperature = 0.3;
-        return body;
-      }
-      if (this.anthropicUsesAdaptive(cfg.model)) {
-        body.thinking = { type: "adaptive" };
-        body.output_config = { effort };
-      } else {
-        body.thinking = { type: "enabled", budget_tokens: this.anthropicBudget(effort) };
-      }
-      // temperature/top_p/top_k must be left at defaults when thinking is active — omit them.
-      return body;
-    },
-
-    buildGeminiBody(cfg, systemPrompt, contents) {
-      const effort = cfg.reasoningEffort || "high";
-      const thinking = this.effectiveThinking('gemini', cfg);
-      const generationConfig = { maxOutputTokens: 16384 };
-      if (thinking) {
-        const thinkingConfig = { includeThoughts: true };
-        if (this.geminiUses3x(cfg.model)) thinkingConfig.thinkingLevel = this.geminiLevel(effort);
-        else thinkingConfig.thinkingBudget = this.geminiBudget(effort);
-        generationConfig.thinkingConfig = thinkingConfig;
-        // temperature omitted for parity with OpenAI/Anthropic reasoning paths (both forbid it when thinking is on).
-      } else {
-        // 2.5: budget 0 disables; 3.x: minimum level (some 3.x variants can't fully disable).
-        generationConfig.thinkingConfig = this.geminiUses3x(cfg.model)
-          ? { thinkingLevel: "minimal", includeThoughts: false }
-          : { thinkingBudget: 0, includeThoughts: false };
-        generationConfig.temperature = 0.3;
-      }
-      return {
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig
-      };
-    },
-
     syncSelect(el, cfg) {
       // Defer until after Alpine flushes <template x-for> so options exist before we assign.
       this.$nextTick(() => {
@@ -758,22 +654,31 @@ function meetingApp() {
       return null;
     },
 
-    async callLLMStreaming(systemPrompt, userMessage, onThinking, onContent, signal) {
+    async callLLMStreaming(systemPrompt, userMessage, onThinking, onContent, signal, opts = {}) {
       if (this.activeProvider === "anthropic") {
-        return this.callAnthropicStreaming(systemPrompt, userMessage, onThinking, onContent, signal);
+        return this.callAnthropicStreaming(systemPrompt, userMessage, onThinking, onContent, signal, opts);
       }
       if (this.activeProvider === "gemini") {
-        return this.callGeminiStreaming(systemPrompt, userMessage, onThinking, onContent, signal);
+        return this.callGeminiStreaming(systemPrompt, userMessage, onThinking, onContent, signal, opts);
       }
-      return this.callOpenAIStreaming(systemPrompt, userMessage, onThinking, onContent, signal);
+      return this.callOpenAIStreaming(systemPrompt, userMessage, onThinking, onContent, signal, opts);
     },
 
-    async callOpenAIStreaming(systemPrompt, userMessage, onThinking, onContent, signal) {
+    async callOpenAIStreaming(systemPrompt, userMessage, onThinking, onContent, signal, opts = {}) {
       const cfg = this.providers[this.activeProvider];
-      const messages = [{ role: "system", content: systemPrompt }];
-      messages.push({ role: "user", content: userMessage || "Please generate the output." });
+      let messages;
+      if (opts.history) {
+        // Caller provides the full conversation; we still prepend system.
+        messages = [{ role: "system", content: systemPrompt }, ...opts.history];
+      } else {
+        messages = [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage || "Please generate the output." }
+        ];
+      }
 
-      const body = this.buildOpenAIBody(cfg, messages, true);
+      const includeTools = opts.includeTools !== false;
+      const body = buildOpenAIBody(this.activeProvider, cfg, messages, true, includeTools);
       const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.apiKey },
@@ -785,59 +690,30 @@ function meetingApp() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let fullContent = "";
+      const state = createOpenAIState();
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith("data: ")) continue;
-          const data = trimmed.slice(6);
-          if (data === "[DONE]") continue;
-          try {
-            const json = JSON.parse(data);
-            const delta = json.choices?.[0]?.delta;
-            if (!delta) { console.debug("[SSE OpenAI] no delta", json); continue; }
-            // Thinking/reasoning content (DeepSeek, o1, etc.)
-            if (delta.reasoning_content) {
-              console.debug("[SSE OpenAI] thinking:", delta.reasoning_content.substring(0, 80));
-              onThinking(delta.reasoning_content);
-            }
-            // Some providers use 'reasoning' field
-            if (delta.reasoning) {
-              console.debug("[SSE OpenAI] reasoning:", delta.reasoning.substring(0, 80));
-              onThinking(delta.reasoning);
-            }
-            // Regular content
-            if (delta.content) {
-              fullContent += delta.content;
-              onContent(delta.content);
-            }
-            // Log if delta has unknown keys
-            const known = ["role", "content", "reasoning_content", "reasoning", "tool_calls", "function_call"];
-            const unknown = Object.keys(delta).filter(k => !known.includes(k));
-            if (unknown.length) console.debug("[SSE OpenAI] unknown delta keys:", unknown, delta);
-          } catch (e) { /* skip malformed chunks */ }
-        }
+        const { events, remainder } = parseSseLines(buffer);
+        buffer = remainder;
+        for (const ev of events) handleOpenAIChunk(state, ev, onThinking, onContent);
       }
-      return fullContent;
+      return finalizeOpenAIState(state);
     },
 
-    async callAnthropicStreaming(systemPrompt, userMessage, onThinking, onContent, signal) {
+    async callAnthropicStreaming(systemPrompt, userMessage, onThinking, onContent, signal, opts = {}) {
       const cfg = this.providers[this.activeProvider];
-      const msgs = [];
-      if (userMessage) {
-        msgs.push({ role: "user", content: userMessage });
+      let msgs;
+      if (opts.history) {
+        msgs = [...opts.history];
       } else {
-        msgs.push({ role: "user", content: "Please process the request." });
+        msgs = [{ role: "user", content: userMessage || "Please process the request." }];
       }
 
-      const body = this.buildAnthropicBody(cfg, systemPrompt, msgs, true);
+      const includeTools = opts.includeTools !== false;
+      const body = buildAnthropicBody(cfg, systemPrompt, msgs, true, includeTools);
       const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
@@ -849,50 +725,30 @@ function meetingApp() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let fullContent = "";
+      const state = createAnthropicState();
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          if (!trimmed.startsWith("data: ")) continue;
-          const data = trimmed.slice(6);
-          try {
-            const json = JSON.parse(data);
-            if (json.type === "content_block_start" && json.content_block?.type === "thinking") {
-              if (json.content_block.thinking) onThinking(json.content_block.thinking);
-            }
-            if (json.type === "content_block_delta") {
-              if (json.delta?.type === "thinking_delta" && json.delta.thinking) {
-                onThinking(json.delta.thinking);
-              }
-              if (json.delta?.type === "text_delta" && json.delta.text) {
-                fullContent += json.delta.text;
-                onContent(json.delta.text);
-              }
-            }
-          } catch (e) { /* skip malformed chunks */ }
-        }
+        const { events, remainder } = parseSseLines(buffer);
+        buffer = remainder;
+        for (const ev of events) handleAnthropicEvent(state, ev, onThinking, onContent);
       }
-      return fullContent;
+      return finalizeAnthropicState(state);
     },
 
-    async callGeminiStreaming(systemPrompt, userMessage, onThinking, onContent, signal) {
+    async callGeminiStreaming(systemPrompt, userMessage, onThinking, onContent, signal, opts = {}) {
       const cfg = this.providers.gemini;
-      const contents = [];
-      if (userMessage) {
-        contents.push({ role: "user", parts: [{ text: userMessage }] });
+      let contents;
+      if (opts.history) {
+        contents = [...opts.history];
       } else {
-        contents.push({ role: "user", parts: [{ text: "Please process the request." }] });
+        contents = [{ role: "user", parts: [{ text: userMessage || "Please process the request." }] }];
       }
 
-      const body = this.buildGeminiBody(cfg, systemPrompt, contents);
+      const includeTools = opts.includeTools !== false;
+      const body = buildGeminiBody(cfg, systemPrompt, contents, includeTools);
 
       const url = cfg.baseUrl.replace(/\/$/, "") + "/models/" + cfg.model + ":streamGenerateContent?alt=sse&key=" + encodeURIComponent(cfg.apiKey);
       const res = await fetch(url, {
@@ -906,35 +762,17 @@ function meetingApp() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let fullContent = "";
+      const state = createGeminiState();
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith("data: ")) continue;
-          const data = trimmed.slice(6);
-          try {
-            const json = JSON.parse(data);
-            const parts = json.candidates?.[0]?.content?.parts;
-            if (!parts) continue;
-            for (const part of parts) {
-              if (part.thought && part.text) {
-                onThinking(part.text);
-              } else if (part.text && !part.thought) {
-                fullContent += part.text;
-                onContent(part.text);
-              }
-            }
-          } catch (e) { /* skip malformed chunks */ }
-        }
+        const { events, remainder } = parseSseLines(buffer);
+        buffer = remainder;
+        for (const ev of events) handleGeminiChunk(state, ev, onThinking, onContent);
       }
-      return fullContent;
+      return finalizeGeminiState(state);
     },
 
     async callGemini(systemPrompt, userMessage) {
@@ -946,7 +784,8 @@ function meetingApp() {
         contents.push({ role: "user", parts: [{ text: "Please process the request." }] });
       }
 
-      const body = this.buildGeminiBody(cfg, systemPrompt, contents);
+      // Non-streaming path is used only by testConnection — skip tool injection.
+      const body = buildGeminiBody(cfg, systemPrompt, contents, false);
 
       const url = cfg.baseUrl.replace(/\/$/, "") + "/models/" + cfg.model + ":generateContent?key=" + encodeURIComponent(cfg.apiKey);
       const res = await fetch(url, {
@@ -974,7 +813,8 @@ function meetingApp() {
       const messages = [{ role: "system", content: systemPrompt }];
       if (userMessage) messages.push({ role: "user", content: userMessage });
 
-      const body = this.buildOpenAIBody(cfg, messages, false);
+      // Non-streaming path is used only by testConnection — skip tool injection.
+      const body = buildOpenAIBody(this.activeProvider, cfg, messages, false, false);
       const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.apiKey },
@@ -991,7 +831,8 @@ function meetingApp() {
       if (userMessage) messages.push({ role: "user", content: userMessage });
       else messages.push({ role: "user", content: "Please process the request." });
 
-      const body = this.buildAnthropicBody(cfg, systemPrompt, messages, false);
+      // Non-streaming path is used only by testConnection — skip tool injection.
+      const body = buildAnthropicBody(cfg, systemPrompt, messages, false, false);
       const res = await fetch(cfg.baseUrl.replace(/\/$/, "") + "/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
