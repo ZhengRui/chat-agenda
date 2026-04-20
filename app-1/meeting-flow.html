@@ -152,6 +152,14 @@
                 <div x-show="msg.segments" class="mt-2 text-xs text-green-600 font-medium">
                   Updated: <span x-text="msg.segments + ' segments'"></span>
                 </div>
+                <template x-if="msg.info">
+                  <div class="mt-1 text-[10px] text-gray-400">
+                    <span x-text="msg.info.provider"></span> ·
+                    <span x-text="msg.info.model"></span> ·
+                    effort: <span x-text="msg.info.effort"></span> ·
+                    <span x-text="msg.info.elapsed"></span>
+                  </div>
+                </template>
                 <div x-show="msg.error" class="mt-1 text-xs text-red-500" x-text="msg.error"></div>
               </div>
             </div>
@@ -508,6 +516,10 @@ function meetingApp() {
 
       // Create a streaming assistant message placeholder
       const msgId = Date.now() + 1;
+      const startTime = Date.now();
+      const reqModel = providerCfg.model;
+      const reqEffort = providerCfg.reasoningEffort || "high";
+      const reqProvider = this.activeProvider;
       this.streamingMsg = { id: msgId, role: "assistant", content: "", thinking: "", showThinking: true, streaming: true, isJson: true };
       this.messages.push(this.streamingMsg);
       this.loading = true;
@@ -539,6 +551,8 @@ function meetingApp() {
         }
 
         this.streamingMsg.streaming = false;
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + "s";
+        this.streamingMsg.info = { provider: reqProvider, model: reqModel, effort: reqEffort, elapsed };
 
         const parsed = this.parseJSON(fullResponse);
         if (parsed) {
@@ -570,6 +584,8 @@ function meetingApp() {
         }
       } catch (e) {
         this.streamingMsg.streaming = false;
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + "s";
+        this.streamingMsg.info = { provider: reqProvider, model: reqModel, effort: reqEffort, elapsed };
         if (e.name === "AbortError") {
           this.streamingMsg.content = this.streamingMsg.content || "[Request cancelled]";
         } else {
