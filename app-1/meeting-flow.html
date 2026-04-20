@@ -58,7 +58,10 @@
           <!-- DeepSeek: static model name, no selection needed -->
           <div x-show="name === 'deepseek'" class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-600">model1</div>
           <!-- Other providers: select dropdown -->
-          <select x-show="name !== 'deepseek'" x-model="cfg.model" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+          <select x-show="name !== 'deepseek'"
+            x-effect="syncSelect($el, cfg)"
+            @change="cfg.model = $el.value"
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
             <template x-for="m in cfg.presetModels" :key="m">
               <option :value="m" x-text="m"></option>
             </template>
@@ -157,10 +160,10 @@
             x-effect="syncSelect($el, providers[activeProvider])"
             @change="providers[activeProvider].model = $el.value"
             class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none flex-1">
-            <option value="__custom__">Other (custom)...</option>
             <template x-for="m in providers[activeProvider].presetModels" :key="m">
               <option :value="m" x-text="m"></option>
             </template>
+            <option value="__custom__">Other (custom)...</option>
           </select>
           <span x-show="activeProvider === 'deepseek'" class="text-xs text-gray-500 px-2 py-1 flex-1">model1</span>
           <input x-show="activeProvider !== 'deepseek' && providers[activeProvider].model === '__custom__'"
@@ -563,9 +566,10 @@ function meetingApp() {
     },
 
     syncSelect(el, cfg) {
-      // Force browser <select> to display the correct option when provider changes
-      const target = cfg.model;
-      if (el.value !== target) el.value = target;
+      // Defer until after Alpine flushes <template x-for> so options exist before we assign.
+      this.$nextTick(() => {
+        if (el.value !== cfg.model) el.value = cfg.model;
+      });
     },
 
     parseJSON(text) {
