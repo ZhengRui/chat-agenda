@@ -10,12 +10,32 @@
 //     isJson, isToolCall,                // flags
 //     toolCalls: [{id, name, args, result}],   // on assistant tool_use turns (one assistant
 //                                              // message can carry multiple parallel tool_calls)
+//     geminiParts,                       // Array<Part> raw Gemini model parts for exact replay
 //     toolCallId, toolCallName, toolResult,    // on tool-result messages (role: "tool")
 //     info, error, streaming }
 //
 // Per-provider output conforms to each API's messages/contents spec.
 
 const HISTORY_DEFAULT_LIMIT = 20;
+
+function clonePlainJson(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function prependToLatestUserTextTurn(history, prefix) {
+  if (!Array.isArray(history) || !history.length || !prefix) return history;
+  const last = history[history.length - 1];
+  if (!last || last.role !== "user") return history;
+  if (typeof last.content === "string") {
+    last.content = prefix + last.content;
+    return history;
+  }
+  if (Array.isArray(last.parts)) {
+    const textPart = last.parts.find(p => p && typeof p.text === "string");
+    if (textPart) textPart.text = prefix + textPart.text;
+  }
+  return history;
+}
 
 function filterInternalMessages(messages) {
   return messages.filter(m =>
@@ -53,11 +73,18 @@ function pairSafeMessages(messages) {
 }
 
 // Take last `limit` messages; if the slice would start mid-pair
-// (leading tool_result), extend backward to the preceding assistant tool-call turn.
+// (leading tool_result or assistant tool-call turn), extend backward to the
+// preceding user/model trigger turn. Gemini is especially strict here: a
+// functionCall turn cannot become the first retained turn in history.
 function truncatePreservingPairs(messages, limit = HISTORY_DEFAULT_LIMIT) {
   if (messages.length <= limit) return messages;
   let start = messages.length - limit;
-  while (start > 0 && messages[start].role === "tool") start--;
+  while (
+    start > 0 &&
+    (messages[start].role === "tool" || messages[start].isToolCall === true)
+  ) {
+    start--;
+  }
   return messages.slice(start);
 }
 
@@ -157,10 +184,14 @@ function historyToGemini(messages) {
       out.push({ role: "user", parts: [{ text: m.content || "" }] });
       i++;
     } else if (m.role === "assistant" && m.isToolCall && Array.isArray(m.toolCalls)) {
-      const parts = [];
-      if (m.content) parts.push({ text: m.content });
-      for (const tc of m.toolCalls) {
-        parts.push({ functionCall: { name: tc.name, args: tc.args || {} } });
+      const parts = Array.isArray(m.geminiParts) && m.geminiParts.length
+        ? m.geminiParts.map(clonePlainJson)
+        : [];
+      if (!parts.length) {
+        if (m.content) parts.push({ text: m.content });
+        for (const tc of m.toolCalls) {
+          parts.push({ functionCall: { name: tc.name, args: tc.args || {} } });
+        }
       }
       out.push({ role: "model", parts });
       i++;

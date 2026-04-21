@@ -9,6 +9,9 @@ const s = loadScripts(
   ["streaming.js"],
   [
     "parseSseLines",
+    "isOpenAITerminalChunk",
+    "isAnthropicTerminalEvent",
+    "isGeminiTerminalChunk",
     "createOpenAIState", "handleOpenAIChunk", "finalizeOpenAIState",
     "createAnthropicState", "handleAnthropicEvent", "finalizeAnthropicState",
     "createGeminiState", "handleGeminiChunk", "finalizeGeminiState"
@@ -19,19 +22,33 @@ const s = loadScripts(
 
 test("parseSseLines: splits events, keeps partial trailing line in remainder", () => {
   const buf = `data: {"a":1}\ndata: {"b":2}\ndata: {"c":`;
-  const { events, remainder } = s.parseSseLines(buf);
+  const { events, remainder, sawDone } = s.parseSseLines(buf);
   assert.equal(events.length, 2);
   assert.equal(events[0].a, 1);
   assert.equal(events[1].b, 2);
   assert.equal(remainder, `data: {"c":`);
+  assert.equal(sawDone, false);
 });
 
-test("parseSseLines: skips [DONE], blank lines, malformed JSON", () => {
+test("parseSseLines: reports [DONE], skips blank lines and malformed JSON", () => {
   const buf = `data: [DONE]\n\ndata: {bad\ndata: {"ok":true}\n`;
-  const { events, remainder } = s.parseSseLines(buf);
+  const { events, remainder, sawDone } = s.parseSseLines(buf);
   assert.equal(events.length, 1);
   assert.equal(events[0].ok, true);
   assert.equal(remainder, "");
+  assert.equal(sawDone, true);
+});
+
+test("terminal detectors: OpenAI, Anthropic, Gemini", () => {
+  assert.equal(s.isOpenAITerminalChunk({ choices: [{ finish_reason: "stop" }] }), true);
+  assert.equal(s.isOpenAITerminalChunk({ choices: [{ finish_reason: null }] }), false);
+
+  assert.equal(s.isAnthropicTerminalEvent({ type: "message_stop" }), true);
+  assert.equal(s.isAnthropicTerminalEvent({ type: "content_block_stop" }), false);
+
+  assert.equal(s.isGeminiTerminalChunk({ candidates: [{ finishReason: "STOP" }] }), true);
+  assert.equal(s.isGeminiTerminalChunk({ promptFeedback: { blockReason: "SAFETY" } }), true);
+  assert.equal(s.isGeminiTerminalChunk({ candidates: [{ content: { parts: [{ text: "x" }] } }] }), false);
 });
 
 // ---- OpenAI / DeepSeek ----
@@ -192,14 +209,21 @@ test("Gemini: thought parts route to onThinking and stay out of content", () => 
   assert.equal(r.content, "answer");
 });
 
-test("Gemini: single-part functionCall produces one tool_call with generated id", () => {
+test("Gemini: single-part functionCall preserves raw part + thoughtSignature", () => {
   const st = s.createGeminiState();
-  s.handleGeminiChunk(st, geminiChunk([{ functionCall: { name: "create_meeting", args: { raw_text: "x" } } }]), () => {}, () => {});
+  s.handleGeminiChunk(st, geminiChunk([{
+    functionCall: { name: "create_meeting", args: { raw_text: "x" } },
+    thoughtSignature: "sig_a"
+  }]), () => {}, () => {});
   const r = s.finalizeGeminiState(st);
   assert.equal(r.toolCalls.length, 1);
   assert.equal(r.toolCalls[0].name, "create_meeting");
   assert.deepEqual({ ...r.toolCalls[0].args }, { raw_text: "x" });
   assert.match(r.toolCalls[0].id, /^gemini_/);
+  assert.equal(r.modelParts.length, 1);
+  assert.equal(r.modelParts[0].thoughtSignature, "sig_a");
+  assert.equal(r.modelParts[0].functionCall.name, "create_meeting");
+  assert.equal(r.toolCalls[0].rawPart.thoughtSignature, "sig_a");
 });
 
 test("Gemini: repeated same-name functionCall parts produce separate tool_calls (parallel calls)", () => {
@@ -225,6 +249,17 @@ test("Gemini: two different functionCalls produce two tool_calls in arrival orde
   assert.equal(r.toolCalls.length, 2);
   assert.equal(r.toolCalls[0].name, "create_meeting");
   assert.equal(r.toolCalls[1].name, "adjust_meeting");
+});
+
+test("Gemini: modelParts keep arrival order across text and functionCall parts", () => {
+  const st = s.createGeminiState();
+  s.handleGeminiChunk(st, geminiChunk([{ text: "Let me check." }]), () => {}, () => {});
+  s.handleGeminiChunk(st, geminiChunk([{ functionCall: { name: "adjust_meeting", args: { request: "x" } }, thoughtSignature: "sig_b" }]), () => {}, () => {});
+  const r = s.finalizeGeminiState(st);
+  assert.equal(r.modelParts.length, 2);
+  assert.equal(r.modelParts[0].text, "Let me check.");
+  assert.equal(r.modelParts[1].functionCall.name, "adjust_meeting");
+  assert.equal(r.modelParts[1].thoughtSignature, "sig_b");
 });
 
 // ---- Final shape consistency ----

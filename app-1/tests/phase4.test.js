@@ -11,6 +11,7 @@ const h = loadScripts(
     "filterInternalMessages",
     "pairSafeMessages",
     "truncatePreservingPairs",
+    "prependToLatestUserTextTurn",
     "historyToOpenAI",
     "historyToAnthropic",
     "historyToGemini",
@@ -125,8 +126,44 @@ test("truncate: walks back when slice would start with tool_result", () => {
     { role: "user", content: "after" }
   ];
   const out = h.truncatePreservingPairs([...head, ...tail], 2);
-  assert.equal(out[0].isToolCall, true);
+  assert.equal(out[0].role, "user");
+  assert.equal(out[1].isToolCall, true);
   assert.equal(out[out.length - 1].content, "after");
+});
+
+test("truncate: walks back when slice would start with assistant tool-call turn", () => {
+  const head = Array.from({ length: 10 }, (_, i) => ({ role: "user", content: "h" + i }));
+  const tail = [
+    { role: "user", content: "please add a segment" },
+    assistantToolCall([{ id: "x1", name: "add_segment", args: { type: "Guest" } }]),
+    { role: "tool", toolCallId: "x1", toolCallName: "add_segment", toolResult: { success: true } },
+    { role: "assistant", content: "done" }
+  ];
+  const out = h.truncatePreservingPairs([...head, ...tail], 3);
+  assert.equal(out[0].role, "user");
+  assert.equal(out[0].content, "please add a segment");
+  assert.equal(out[1].isToolCall, true);
+});
+
+// ---- prependToLatestUserTextTurn ----
+
+test("prependToLatestUserTextTurn: prepends to plain string user content", () => {
+  const history = [{ role: "user", content: "add a 1 min buffer" }];
+  h.prependToLatestUserTextTurn(history, "[snapshot]\n");
+  assert.equal(history[0].content, "[snapshot]\nadd a 1 min buffer");
+});
+
+test("prependToLatestUserTextTurn: prepends to merged Gemini user turn text part", () => {
+  const history = [{
+    role: "user",
+    parts: [
+      { functionResponse: { name: "set_buffer", response: { success: true } } },
+      { text: "add another 1 min buffer" }
+    ]
+  }];
+  h.prependToLatestUserTextTurn(history, "[snapshot]\n");
+  assert.equal(history[0].parts[0].functionResponse.name, "set_buffer");
+  assert.equal(history[0].parts[1].text, "[snapshot]\nadd another 1 min buffer");
 });
 
 // ---- historyToOpenAI ----
@@ -266,6 +303,30 @@ test("Gemini map: functionCall and functionResponse with object-wrapped response
   assert.equal(resp.response.summary.no, 1);
 });
 
+test("Gemini map: replays stored raw geminiParts to preserve thoughtSignature", () => {
+  const out = h.historyToGemini([
+    assistantToolCall(
+      [{ id: "c1", name: "create_meeting", args: { raw_text: "x" } }],
+      {
+        content: "this fallback text should be ignored",
+        geminiParts: [
+          { text: "Let me handle that." },
+          {
+            functionCall: { name: "create_meeting", args: { raw_text: "x" } },
+            thoughtSignature: "sig_a"
+          }
+        ]
+      }
+    ),
+    { role: "tool", toolCallId: "c1", toolCallName: "create_meeting", toolResult: { success: true } }
+  ]);
+  assert.equal(out[0].role, "model");
+  assert.equal(out[0].parts.length, 2);
+  assert.equal(out[0].parts[0].text, "Let me handle that.");
+  assert.equal(out[0].parts[1].functionCall.name, "create_meeting");
+  assert.equal(out[0].parts[1].thoughtSignature, "sig_a");
+});
+
 test("Gemini map: multi functionCall + grouped functionResponse parts", () => {
   const out = h.historyToGemini([
     assistantToolCall([
@@ -286,10 +347,8 @@ test("Gemini map: multi functionCall + grouped functionResponse parts", () => {
 });
 
 test("Gemini map: merges consecutive user turns (functionResponse + next user text)", () => {
-  // Regression: Gemini rejects contents with two user turns in a row. When an assistant
-  // tool call isn't followed by a text reply (typical for fine-grained tools), the
-  // functionResponse user turn is immediately followed by the NEXT user's text turn.
-  // Expect them merged into a single user turn with both parts.
+  // Defensive fallback: if a silent tool round is followed immediately by a new user
+  // message, Gemini still requires strict alternation, so the user-side parts get merged.
   const out = h.historyToGemini([
     { role: "user", content: "delete s25" },
     assistantToolCall([{ id: "a", name: "remove_segment", args: { segment_id: "s25" } }]),
@@ -301,8 +360,6 @@ test("Gemini map: merges consecutive user turns (functionResponse + next user te
   assert.equal(out[0].role, "user");
   assert.equal(out[1].role, "model");
   assert.equal(out[2].role, "user");
-  // Merged user turn carries BOTH the functionResponse and the next user's text.
-  assert.equal(out[2].parts.length, 2);
   assert.ok(out[2].parts[0].functionResponse);
   assert.equal(out[2].parts[0].functionResponse.name, "remove_segment");
   assert.equal(out[2].parts[1].text, "now delete all buffers");
@@ -375,7 +432,44 @@ test("buildHistoryForProvider: respects custom limit and preserves pair at bound
   msgs.push({ id: 101, role: "tool", toolCallId: "c", toolCallName: "f", toolResult: {} });
 
   const out = h.buildHistoryForProvider(msgs, "openai", 2);
-  assert.equal(out.length, 2);
-  assert.ok(out[0].tool_calls);
-  assert.equal(out[1].role, "tool");
+  assert.equal(out.length, 3);
+  assert.equal(out[0].role, "user");
+  assert.ok(out[1].tool_calls);
+  assert.equal(out[2].role, "tool");
+});
+
+test("buildHistoryForProvider: Gemini limit never starts with model functionCall", () => {
+  const head = Array.from({ length: 10 }, (_, i) => ({ id: i, role: "assistant", content: "a" + i }));
+  const tail = [
+    { id: 100, role: "user", content: "please add a segment" },
+    { id: 101, ...assistantToolCall([{ id: "x1", name: "add_segment", args: { type: "Guest" } }]) },
+    { id: 102, role: "tool", toolCallId: "x1", toolCallName: "add_segment", toolResult: { success: true } },
+    { id: 103, role: "assistant", content: "done" }
+  ];
+  const out = h.buildHistoryForProvider([...head, ...tail], "gemini", 3);
+  assert.equal(out[0].role, "user");
+  assert.equal(out[1].role, "model");
+  assert.ok(out[1].parts.some(p => p.functionCall));
+});
+
+test("buildHistoryForProvider: Gemini keeps stored thoughtSignature on tool turns", () => {
+  const msgs = [
+    { id: 1, role: "user", content: "plan" },
+    {
+      id: 2,
+      ...assistantToolCall(
+        [{ id: "c1", name: "create_meeting", args: { raw_text: "r" } }],
+        {
+          geminiParts: [{
+            functionCall: { name: "create_meeting", args: { raw_text: "r" } },
+            thoughtSignature: "sig_build"
+          }]
+        }
+      )
+    },
+    { id: 3, role: "tool", toolCallId: "c1", toolCallName: "create_meeting", toolResult: { success: true } }
+  ];
+  const out = h.buildHistoryForProvider(msgs, "gemini");
+  assert.equal(out[1].role, "model");
+  assert.equal(out[1].parts[0].thoughtSignature, "sig_build");
 });

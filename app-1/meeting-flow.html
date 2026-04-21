@@ -964,12 +964,11 @@ function meetingApp() {
       const reqThinking = effectiveThinking(reqProvider, providerCfg);
 
       // Single bubble reused by router and executor — badge + streaming JSON land on the same message.
-      this.streamingMsg = {
-        id: msgId, role: "assistant",
-        content: "", thinking: "", showThinking: true,
-        streaming: true, isJson: false
-      };
-      this.messages.push(this.streamingMsg);
+      this.messages.push(this.createAssistantMessage(msgId));
+      // Important: mutate the reactive proxy stored inside Alpine state, not the
+      // original plain object returned by createAssistantMessage().
+      const assistantMsg = this.messages[this.messages.length - 1];
+      this.streamingMsg = assistantMsg;
       this.loading = true;
       this.scrollChat(true);
 
@@ -977,8 +976,8 @@ function meetingApp() {
       this.abortController = new AbortController();
 
       try {
-        const onThinking = (chunk) => { this.streamingMsg.thinking += chunk; this.scrollChat(); };
-        const onContent = (chunk) => { this.streamingMsg.content += chunk; this.scrollChat(); };
+        const onThinking = (chunk) => { assistantMsg.thinking += chunk; this.scrollChat(); };
+        const onContent = (chunk) => { assistantMsg.content += chunk; this.scrollChat(); };
 
         // Router: SYSTEM_PROMPT + full history (streamingMsg is streaming:true so it's filtered out).
         // Inject the LIVE agenda snapshot at the HEAD of the current user turn only — so the router
@@ -991,12 +990,7 @@ function meetingApp() {
               meta: { no: this.meeting.meta.no, type: this.meeting.meta.type, theme: this.meeting.meta.theme, manager: this.meeting.meta.manager, date: this.meeting.meta.date, startTime: this.meeting.meta.startTime, endTime: this.meeting.meta.endTime, location: this.meeting.meta.location, introduction: this.meeting.meta.introduction },
               segments: this.meeting.segments.map(s => ({ id: s.id, type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker }))
             }, null, 2) + "\n]\n\n";
-          const last = history[history.length - 1];
-          if (typeof last.content === "string") {
-            last.content = snapshot + last.content;
-          } else if (last.parts && last.parts[0] && typeof last.parts[0].text === "string") {
-            last.parts[0].text = snapshot + last.parts[0].text;
-          }
+          prependToLatestUserTextTurn(history, snapshot);
         }
         const r1 = await this.callLLMStreaming(
           SYSTEM_PROMPT, null, onThinking, onContent,
@@ -1017,13 +1011,7 @@ function meetingApp() {
           // toolCalls[] array — matches the provider APIs' native shape (OpenAI's
           // assistant.tool_calls, Anthropic's multiple tool_use blocks, Gemini's multiple
           // functionCall parts).
-          this.streamingMsg.isJson = true;
-          this.streamingMsg.isToolCall = true;
-          this.streamingMsg.thinkingBlocks = r1.thinkingBlocks || [];
-          this.streamingMsg.content = "";                              // discard any partial JSON from the router stream
-          this.streamingMsg.toolCalls = r1.toolCalls.map(tc => ({
-            id: tc.id, name: tc.name, args: tc.args, result: null
-          }));
+          this.applyToolCallResponseToMessage(assistantMsg, reqProvider, r1);
 
           // Batch animation setup: fine-grained tools accumulate diffs, one FLIP pass at end.
           // Mixed batches (e.g. adjust_meeting / restore_agenda) skip — those tools animate themselves.
@@ -1042,7 +1030,7 @@ function meetingApp() {
             const tc = r1.toolCalls[i];
             const toolResult = await this.executeToolCall(tc, onThinking, onContent);
             // Update via proxy access so Alpine picks up the mutation and re-renders the row.
-            this.streamingMsg.toolCalls[i].result = toolResult;
+            assistantMsg.toolCalls[i].result = toolResult;
 
             this.messages.push({
               id: Date.now() + 1000 + i,
@@ -1058,34 +1046,43 @@ function meetingApp() {
             this._currentAnimCtx = null;
             this._runFlipAnimation(ctx.oldPos, ctx.flashIds, ctx.newIds, ctx.fadeClones);
           }
+
+          this.finalizeAssistantMessage(assistantMsg, {
+            provider: reqProvider, model: reqModel, effort: reqEffort, thinking: reqThinking
+          }, startTime);
+          if (reqProvider === "gemini") {
+            await this.continueGeminiToolLoop(SYSTEM_PROMPT, this.abortController.signal, {
+              provider: reqProvider, model: reqModel, effort: reqEffort, thinking: reqThinking
+            });
+          }
         } else {
           // No tool call: parse JSON for backward compatibility, else plain chat.
           const parsed = this.parseJSON(r1.content);
           if (parsed && (parsed.segments || parsed.meta)) {
-            this.streamingMsg.isJson = true;
+            assistantMsg.isJson = true;
             this.applyAgendaJSON(parsed);
-            this.streamingMsg.content = JSON.stringify(parsed, null, 2);
+            assistantMsg.content = JSON.stringify(parsed, null, 2);
           } else {
-            this.streamingMsg.isJson = false;
+            assistantMsg.isJson = false;
           }
+          this.finalizeAssistantMessage(assistantMsg, {
+            provider: reqProvider, model: reqModel, effort: reqEffort, thinking: reqThinking
+          }, startTime);
         }
-
-        this.streamingMsg.streaming = false;
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + "s";
-        this.streamingMsg.info = { provider: reqProvider, model: reqModel, effort: reqEffort, thinking: reqThinking, elapsed };
       } catch (e) {
-        this.streamingMsg.streaming = false;
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + "s";
-        this.streamingMsg.info = { provider: reqProvider, model: reqModel, effort: reqEffort, thinking: reqThinking, elapsed };
+        this.finalizeAssistantMessage(assistantMsg, {
+          provider: reqProvider, model: reqModel, effort: reqEffort, thinking: reqThinking
+        }, startTime);
         if (e.name === "AbortError") {
-          this.streamingMsg.content = this.streamingMsg.content || "[Request cancelled]";
+          assistantMsg.content = assistantMsg.content || "[Request cancelled]";
         } else {
-          this.streamingMsg.content = this.streamingMsg.content || "Error occurred.";
-          this.streamingMsg.error = e.message;
+          assistantMsg.content = assistantMsg.content || "Error occurred.";
+          assistantMsg.error = e.message;
         }
       } finally {
         this.loading = false;
         this.abortController = null;
+        this.streamingMsg = null;
         this.scrollChat();
       }
     },
@@ -1639,6 +1636,100 @@ function meetingApp() {
       return null;
     },
 
+    createAssistantMessage(id = Date.now()) {
+      return {
+        id, role: "assistant",
+        content: "", thinking: "", showThinking: true,
+        streaming: true, isJson: false
+      };
+    },
+
+    applyToolCallResponseToMessage(msg, providerName, response) {
+      msg.isJson = true;
+      msg.isToolCall = true;
+      msg.thinkingBlocks = response.thinkingBlocks || [];
+      if (providerName === "gemini" && Array.isArray(response.modelParts) && response.modelParts.length) {
+        // Gemini 3 tool turns must round-trip the original model parts so
+        // history replay preserves thought signatures on functionCall parts.
+        msg.geminiParts = response.modelParts;
+      }
+      msg.content = "";
+      msg.toolCalls = response.toolCalls.map(tc => ({
+        id: tc.id, name: tc.name, args: tc.args, result: null
+      }));
+    },
+
+    finalizeAssistantMessage(msg, meta, startedAt) {
+      msg.streaming = false;
+      const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1) + "s";
+      msg.info = {
+        provider: meta.provider,
+        model: meta.model,
+        effort: meta.effort,
+        thinking: meta.thinking,
+        elapsed
+      };
+    },
+
+    async continueGeminiToolLoop(systemPrompt, signal, reqMeta) {
+      const MAX_STEPS = 4;
+      for (let step = 0; step < MAX_STEPS; step++) {
+        this.messages.push(this.createAssistantMessage(Date.now() + 2000 + step));
+        // Same Alpine caveat as sendMessage(): keep the reactive proxy reference.
+        const followMsg = this.messages[this.messages.length - 1];
+        this.streamingMsg = followMsg;
+        this.scrollChat();
+
+        const followStart = Date.now();
+        const onThinking = (chunk) => { followMsg.thinking += chunk; this.scrollChat(); };
+        const onContent = (chunk) => { followMsg.content += chunk; this.scrollChat(); };
+
+        try {
+          const history = buildHistoryForProvider(this.messages, "gemini");
+          const response = await this.callGeminiStreaming(
+            systemPrompt, null, onThinking, onContent, signal,
+            { includeTools: true, history }
+          );
+
+          if (response.toolCalls && response.toolCalls.length) {
+            this.applyToolCallResponseToMessage(followMsg, "gemini", response);
+            for (let i = 0; i < response.toolCalls.length; i++) {
+              const tc = response.toolCalls[i];
+              const toolResult = await this.executeToolCall(tc, onThinking, onContent);
+              followMsg.toolCalls[i].result = toolResult;
+              this.messages.push({
+                id: Date.now() + 3000 + step * 10 + i,
+                role: "tool",
+                toolCallId: tc.id,
+                toolCallName: tc.name,
+                toolResult
+              });
+            }
+            this.finalizeAssistantMessage(followMsg, reqMeta, followStart);
+            continue;
+          }
+
+          this.finalizeAssistantMessage(followMsg, reqMeta, followStart);
+          return;
+        } catch (e) {
+          this.finalizeAssistantMessage(followMsg, reqMeta, followStart);
+          if (e.name === "AbortError") {
+            followMsg.content = followMsg.content || "[Request cancelled]";
+            throw e;
+          }
+          followMsg.content = followMsg.content || "Error occurred.";
+          followMsg.error = e.message || String(e);
+          return;
+        }
+      }
+
+      this.messages.push(this.createAssistantMessage(Date.now() + 9000));
+      const errMsg = this.messages[this.messages.length - 1];
+      errMsg.streaming = false;
+      errMsg.content = "Error occurred.";
+      errMsg.error = "Gemini tool loop exceeded max follow-up steps.";
+    },
+
     async callLLMStreaming(systemPrompt, userMessage, onThinking, onContent, signal, opts = {}) {
       if (this.activeProvider === "anthropic") {
         return this.callAnthropicStreaming(systemPrompt, userMessage, onThinking, onContent, signal, opts);
@@ -1681,9 +1772,17 @@ function meetingApp() {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const { events, remainder } = parseSseLines(buffer);
+        const { events, remainder, sawDone } = parseSseLines(buffer);
         buffer = remainder;
-        for (const ev of events) handleOpenAIChunk(state, ev, onThinking, onContent);
+        let shouldStop = sawDone;
+        for (const ev of events) {
+          handleOpenAIChunk(state, ev, onThinking, onContent);
+          if (isOpenAITerminalChunk(ev)) shouldStop = true;
+        }
+        if (shouldStop) {
+          try { await reader.cancel(); } catch (_) {}
+          break;
+        }
       }
       return finalizeOpenAIState(state);
     },
@@ -1716,9 +1815,17 @@ function meetingApp() {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const { events, remainder } = parseSseLines(buffer);
+        const { events, remainder, sawDone } = parseSseLines(buffer);
         buffer = remainder;
-        for (const ev of events) handleAnthropicEvent(state, ev, onThinking, onContent);
+        let shouldStop = sawDone;
+        for (const ev of events) {
+          handleAnthropicEvent(state, ev, onThinking, onContent);
+          if (isAnthropicTerminalEvent(ev)) shouldStop = true;
+        }
+        if (shouldStop) {
+          try { await reader.cancel(); } catch (_) {}
+          break;
+        }
       }
       return finalizeAnthropicState(state);
     },
@@ -1753,9 +1860,17 @@ function meetingApp() {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        const { events, remainder } = parseSseLines(buffer);
+        const { events, remainder, sawDone } = parseSseLines(buffer);
         buffer = remainder;
-        for (const ev of events) handleGeminiChunk(state, ev, onThinking, onContent);
+        let shouldStop = sawDone;
+        for (const ev of events) {
+          handleGeminiChunk(state, ev, onThinking, onContent);
+          if (isGeminiTerminalChunk(ev)) shouldStop = true;
+        }
+        if (shouldStop) {
+          try { await reader.cancel(); } catch (_) {}
+          break;
+        }
       }
       return finalizeGeminiState(state);
     },

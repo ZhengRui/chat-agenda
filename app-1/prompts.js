@@ -48,6 +48,8 @@ Three families of tools, each with a unilateral version (acts on ONE segment) an
 
 **Parallel tool calls:** for compound requests (e.g. "change Frank to Joyce AND make Timer 3 min"), emit multiple tool_calls in a single response — executor runs them as a batch with a single animation.
 
+**After tool results are provided:** if no more tool calls are needed, reply in plain text with a brief confirmation of the completed change (1 short sentence).
+
 **Do NOT call any tool when:**
 - The user is chit-chatting ("hello", "thanks", "cool").
 - The user is asking a question about the existing agenda ("who is taking TOM?", "when does tea break start?") — answer directly.

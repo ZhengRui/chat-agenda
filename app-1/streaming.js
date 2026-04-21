@@ -4,21 +4,45 @@
 // tests both load this file directly.
 // ============================================================
 
+function clonePlainJson(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
 // Split an SSE buffer into parsed `data:` JSON events plus any
 // trailing partial line. Caller feeds the remainder back in next round.
-// Non-JSON lines, comments, and [DONE] markers are skipped silently.
+// Non-JSON lines and comments are skipped silently. `[DONE]` is surfaced so
+// callers can terminate even if the server keeps the SSE socket open.
 function parseSseLines(buffer) {
   const lines = buffer.split("\n");
   const remainder = lines.pop() || "";
   const events = [];
+  let sawDone = false;
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || !trimmed.startsWith("data: ")) continue;
     const data = trimmed.slice(6);
-    if (data === "[DONE]") continue;
+    if (data === "[DONE]") {
+      sawDone = true;
+      continue;
+    }
     try { events.push(JSON.parse(data)); } catch (_) { /* skip malformed */ }
   }
-  return { events, remainder };
+  return { events, remainder, sawDone };
+}
+
+function isOpenAITerminalChunk(chunk) {
+  const choices = chunk?.choices;
+  return Array.isArray(choices) && choices.some(choice => choice?.finish_reason != null);
+}
+
+function isAnthropicTerminalEvent(event) {
+  return event?.type === "message_stop";
+}
+
+function isGeminiTerminalChunk(chunk) {
+  if (chunk?.promptFeedback?.blockReason) return true;
+  const candidates = chunk?.candidates;
+  return Array.isArray(candidates) && candidates.some(candidate => candidate?.finishReason);
 }
 
 // ---- OpenAI / DeepSeek ----
@@ -135,7 +159,8 @@ function createGeminiState() {
   return {
     content: "",
     thinkingBlocks: [],
-    toolCalls: []
+    toolCalls: [],
+    modelParts: []
   };
 }
 
@@ -143,6 +168,8 @@ function handleGeminiChunk(state, chunk, onThinking, onContent) {
   const parts = chunk.candidates?.[0]?.content?.parts;
   if (!Array.isArray(parts)) return;
   for (const part of parts) {
+    const rawPart = clonePlainJson(part);
+    state.modelParts.push(rawPart);
     if (part.thought && part.text) {
       onThinking(part.text);
       // Gemini thought summaries carry no signature, so don't push into thinkingBlocks.
@@ -155,12 +182,18 @@ function handleGeminiChunk(state, chunk, onThinking, onContent) {
         name: part.functionCall.name,
         args: (part.functionCall.args && typeof part.functionCall.args === "object")
           ? { ...part.functionCall.args }
-          : {}
+          : {},
+        rawPart
       });
     }
   }
 }
 
 function finalizeGeminiState(state) {
-  return { content: state.content, toolCalls: state.toolCalls, thinkingBlocks: state.thinkingBlocks };
+  return {
+    content: state.content,
+    toolCalls: state.toolCalls,
+    thinkingBlocks: state.thinkingBlocks,
+    modelParts: state.modelParts
+  };
 }
