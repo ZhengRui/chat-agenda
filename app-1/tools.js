@@ -18,8 +18,155 @@ const TOOL_REGISTRY = [
     required: ["raw_text"]
   },
   {
+    name: "set_role",
+    description: "UNILATERAL: set who takes a role in ONE segment. Other fields (type, duration, start time) stay the same. For exchanging role takers between TWO segments, use swap_roles instead.",
+    params: {
+      segment_id: {
+        type: "string",
+        description: "Segment id from the current agenda snapshot (e.g. 's3', 's10')."
+      },
+      new_role_taker: {
+        type: "string",
+        description: "New role taker's name. Pass empty string to clear."
+      }
+    },
+    required: ["segment_id", "new_role_taker"]
+  },
+  {
+    name: "swap_roles",
+    description: "BIDIRECTIONAL: swap the role takers of TWO segments — atomic exchange of only the roleTaker field, positions and times do NOT change. Use for 'swap A and B's roles', 'Frank 和 Joyce 的角色互换'. Does NOT move the cards.",
+    params: {
+      segment_id_a: {
+        type: "string",
+        description: "Id of the first segment."
+      },
+      segment_id_b: {
+        type: "string",
+        description: "Id of the second segment."
+      }
+    },
+    required: ["segment_id_a", "segment_id_b"]
+  },
+  {
+    name: "set_duration",
+    description: "UNILATERAL: set the duration (in minutes) of ONE segment. Downstream segment start times recompute automatically.",
+    params: {
+      segment_id: {
+        type: "string",
+        description: "Segment id from the current agenda snapshot."
+      },
+      new_duration_min: {
+        type: "integer",
+        description: "New duration in minutes, positive integer."
+      }
+    },
+    required: ["segment_id", "new_duration_min"]
+  },
+  {
+    name: "add_segment",
+    description: "Insert a new segment. Type may be a standard Toastmasters name (e.g. 'Grammarian', 'Workshop') or a custom one (e.g. 'Ice Breaker Game'). Downstream start times recompute. Provide exactly one of after_id / before_id to anchor the position.",
+    params: {
+      type: {
+        type: "string",
+        description: "Segment type/name, verbatim as the user wants it displayed."
+      },
+      duration_min: {
+        type: "integer",
+        description: "Duration in minutes, positive integer."
+      },
+      after_id: {
+        type: "string",
+        description: "Insert AFTER the segment with this id. Provide this OR before_id, not both."
+      },
+      before_id: {
+        type: "string",
+        description: "Insert BEFORE the segment with this id. Provide this OR after_id, not both."
+      },
+      role_taker: {
+        type: "string",
+        description: "Optional role taker's name. Pass empty string if unspecified."
+      }
+    },
+    required: ["type", "duration_min"]
+  },
+  {
+    name: "remove_segment",
+    description: "Delete an existing segment from the agenda. Downstream start times recompute automatically.",
+    params: {
+      segment_id: {
+        type: "string",
+        description: "Segment id from the current agenda snapshot."
+      }
+    },
+    required: ["segment_id"]
+  },
+  {
+    name: "move_segment",
+    description: "UNILATERAL move: relocate ONE existing segment to a new position. The other segments stay put — only their indices shift to make room. This is NOT a swap. Use this for 'move X to the top', 'put Tea Break before GE', 'move the workshop to after TTM'. For exchanging two segments' positions, use swap_segments instead. Keeps id/type/duration/role unchanged. Downstream start times recompute.",
+    params: {
+      segment_id: {
+        type: "string",
+        description: "Segment id of the one segment being moved."
+      },
+      after_id: {
+        type: "string",
+        description: "Move the segment to directly AFTER this other segment's id. Provide this OR before_id, not both."
+      },
+      before_id: {
+        type: "string",
+        description: "Move the segment to directly BEFORE this other segment's id. Provide this OR after_id, not both."
+      }
+    },
+    required: ["segment_id"]
+  },
+  {
+    name: "swap_time",
+    description: "BIDIRECTIONAL: swap the time slots / positions of TWO segments in the agenda — they exchange where they sit in the sequence, so their start times effectively swap after downstream recomputation. Both segments keep their id/type/duration/roleTaker; only sequence positions (and thus times) are swapped. Use for 'swap A and B's time slots', '把这两张卡的时间调换一下', 'A 和 B 换个时间段'. Works for adjacent AND non-adjacent pairs — one call is always enough.",
+    params: {
+      segment_id_a: {
+        type: "string",
+        description: "Id of the first segment."
+      },
+      segment_id_b: {
+        type: "string",
+        description: "Id of the second segment."
+      }
+    },
+    required: ["segment_id_a", "segment_id_b"]
+  },
+  {
+    name: "set_buffer",
+    description: "Set the buffer (gap/间隔) minutes BEFORE a segment. A buffer is the time gap between the previous segment ending and this segment starting — NOT a separate segment. Use this when the user asks for a 'buffer', 'gap', '间隔', or 'pause' between specific segments. Downstream start times recompute.",
+    params: {
+      segment_id: {
+        type: "string",
+        description: "Segment id of the segment AFTER the buffer (the one whose start time gets pushed back by buffer_min). For 'add 1 min buffer between PS1 and PS2', pass PS2's id."
+      },
+      buffer_min: {
+        type: "integer",
+        description: "Buffer duration in minutes. 0 means no gap (back-to-back)."
+      }
+    },
+    required: ["segment_id", "buffer_min"]
+  },
+  {
+    name: "set_meta",
+    description: "Change a meeting-level field. Supported: theme, location, date, start_time, no, manager, introduction. end_time is derived and cannot be set directly — change start_time or segment durations instead.",
+    params: {
+      field: {
+        type: "string",
+        description: "One of: theme, location, date, start_time, no, manager, introduction."
+      },
+      value: {
+        type: "string",
+        description: "New value as a string. For 'no' pass the number as a string (e.g. '387')."
+      }
+    },
+    required: ["field", "value"]
+  },
+  {
     name: "adjust_meeting",
-    description: "Modify the existing meeting agenda according to the user's request (swap roles, change durations, add or remove segments). Requires an agenda to already exist in the conversation. Do NOT call to answer questions about the existing agenda.",
+    description: "FALLBACK ONLY. Use for complex compound requests that can't be expressed with the fine-grained tools above (e.g. 'translate all role names to Chinese', 'reorganize all evaluators by seniority'). Runs a second LLM pass and returns a fresh full agenda — slower and more expensive. Prefer fine-grained tools whenever possible.",
     params: {
       request: {
         type: "string",

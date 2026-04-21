@@ -68,20 +68,50 @@ test("Gemini adapter: all types uppercase (OBJECT/STRING), wrapped in functionDe
 });
 
 test("adjust_meeting present and consistent across all three schemas", () => {
-  assert.equal(loaded.TOOLS_OPENAI[1].function.name, "adjust_meeting");
-  assert.equal(loaded.TOOLS_ANTHROPIC[1].name, "adjust_meeting");
-  assert.equal(
-    loaded.TOOLS_GEMINI[0].functionDeclarations[1].name,
-    "adjust_meeting"
-  );
-  // The required-field name should match across formats.
+  const oai = loaded.TOOLS_OPENAI.find(t => t.function.name === "adjust_meeting");
+  const anth = loaded.TOOLS_ANTHROPIC.find(t => t.name === "adjust_meeting");
+  const gem = loaded.TOOLS_GEMINI[0].functionDeclarations.find(d => d.name === "adjust_meeting");
+  assert.ok(oai && anth && gem, "adjust_meeting missing from one or more adapters");
   // Spread to normalise sandbox-origin arrays for strict deepEqual.
-  assert.deepEqual([...loaded.TOOLS_OPENAI[1].function.parameters.required], ["request"]);
-  assert.deepEqual([...loaded.TOOLS_ANTHROPIC[1].input_schema.required], ["request"]);
-  assert.deepEqual(
-    [...loaded.TOOLS_GEMINI[0].functionDeclarations[1].parameters.required],
-    ["request"]
-  );
+  assert.deepEqual([...oai.function.parameters.required], ["request"]);
+  assert.deepEqual([...anth.input_schema.required], ["request"]);
+  assert.deepEqual([...gem.parameters.required], ["request"]);
+});
+
+test("Fine-grained tools present across all three adapters", () => {
+  const FINE = ["set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"];
+  for (const name of FINE) {
+    const inReg = loaded.TOOL_REGISTRY.some(t => t.name === name);
+    const inOai = loaded.TOOLS_OPENAI.some(t => t.function.name === name);
+    const inAnth = loaded.TOOLS_ANTHROPIC.some(t => t.name === name);
+    const inGem = loaded.TOOLS_GEMINI[0].functionDeclarations.some(d => d.name === name);
+    assert.ok(inReg, `${name} missing from TOOL_REGISTRY`);
+    assert.ok(inOai, `${name} missing from TOOLS_OPENAI`);
+    assert.ok(inAnth, `${name} missing from TOOLS_ANTHROPIC`);
+    assert.ok(inGem, `${name} missing from TOOLS_GEMINI`);
+  }
+});
+
+test("add_segment exposes after_id + before_id (optional) and type/duration_min required", () => {
+  const add = loaded.TOOL_REGISTRY.find(t => t.name === "add_segment");
+  assert.ok(add.params.after_id && add.params.before_id);
+  assert.deepEqual([...add.required].sort(), ["duration_min", "type"]);
+});
+
+test("set_meta params expose a single field + value, both required", () => {
+  const sm = loaded.TOOL_REGISTRY.find(t => t.name === "set_meta");
+  assert.ok(sm.params.field && sm.params.value);
+  assert.deepEqual([...sm.required].sort(), ["field", "value"]);
+});
+
+test("Gemini keeps uppercase types for all fine-grained tools", () => {
+  const decls = loaded.TOOLS_GEMINI[0].functionDeclarations;
+  for (const d of decls) {
+    assert.equal(d.parameters.type, "OBJECT", `${d.name}: parameters.type should be OBJECT`);
+    for (const [name, prop] of Object.entries(d.parameters.properties)) {
+      assert.ok(prop.type === prop.type.toUpperCase(), `${d.name}.${name}: type ${prop.type} should be uppercase`);
+    }
+  }
 });
 
 test("SYSTEM_PROMPT exists, non-trivial, mentions both tools and at least one no-tool case", () => {

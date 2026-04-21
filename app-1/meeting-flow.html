@@ -49,7 +49,7 @@
     15%  { box-shadow: 0 0 0 3px rgba(59,130,246,0.55), 0 0 12px rgba(59,130,246,0.35); }
     100% { box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
   }
-  .segment-card.card-flash { animation: card-flash 800ms ease-out; }
+  .segment-card.card-flash { animation: card-flash 1500ms ease-out; }
   .markdown-body { line-height: 1.55; word-break: break-word; }
   .markdown-body > *:first-child { margin-top: 0; }
   .markdown-body > *:last-child { margin-bottom: 0; }
@@ -134,6 +134,28 @@
     </div>
   </div>
 
+  <!-- Revert confirmation modal -->
+  <div x-cloak x-show="revertPending" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center" @click.self="cancelRevert()" @keydown.escape.window="cancelRevert()">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 mx-4" @click.stop>
+      <div class="flex items-start gap-3 mb-4">
+        <div class="shrink-0 w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+          <svg class="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+          </svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <h3 class="text-base font-semibold text-gray-800">退回到这条消息之前</h3>
+          <p class="text-xs text-gray-500 mt-1 leading-relaxed">议程会恢复到这条消息发送前的状态，这条消息和之后的所有对话将被清除。消息内容会填回输入框，方便你重说。</p>
+        </div>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-700 max-h-24 overflow-y-auto whitespace-pre-wrap mb-4" x-text="revertPending && revertPending.content"></div>
+      <div class="flex gap-2 justify-end">
+        <button @click="cancelRevert()" class="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">取消</button>
+        <button @click="confirmRevert()" class="px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition">确认退回</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Header -->
   <header class="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0 z-10">
     <div class="flex items-center gap-3">
@@ -167,16 +189,31 @@
               <span class="text-xs text-gray-400 bg-gray-50 px-3 py-1 rounded-full" x-text="msg.content"></span>
             </div>
             <!-- User message -->
-            <div x-show="msg.role==='user'" class="flex justify-end">
+            <div x-show="msg.role==='user'" class="flex justify-end items-start gap-1.5 group">
+              <button x-show="msg.prevAgenda" @click="revertToMessage(msg)"
+                      class="opacity-0 group-hover:opacity-100 transition text-gray-300 hover:text-gray-500 mt-2 shrink-0"
+                      title="退回到这条消息之前的状态">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                </svg>
+              </button>
               <div class="max-w-[85%] bg-blue-500 text-white rounded-2xl rounded-br-md px-4 py-2 text-sm whitespace-pre-wrap" x-text="msg.content"></div>
             </div>
             <!-- Assistant message -->
             <div x-show="msg.role==='assistant'" class="flex justify-start">
               <div class="max-w-[90%] bg-gray-100 text-gray-800 rounded-2xl rounded-bl-md px-4 py-2 text-sm">
-                <!-- Tool call badge -->
-                <div x-show="msg.isToolCall" class="mb-1">
-                  <span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium"
-                    x-text="'🔧 ' + msg.toolCallName"></span>
+                <!-- Tool calls: one row per tc; all grouped in this single assistant bubble. -->
+                <div x-show="msg.isToolCall && msg.toolCalls && msg.toolCalls.length" class="mb-1 space-y-1">
+                  <template x-for="tc in msg.toolCalls" :key="tc.id">
+                    <div class="flex items-start gap-2 flex-wrap">
+                      <span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium whitespace-nowrap"
+                        x-text="'🔧 ' + tc.name"></span>
+                      <span x-show="tc.args && Object.keys(tc.args).length" class="text-[10px] text-gray-500 font-mono break-all leading-relaxed"
+                        x-text="formatToolArgs(tc.args)"></span>
+                      <span x-show="tc.result && tc.result.success === false" class="text-[10px] text-red-500"
+                        x-text="'✗ ' + ((tc.result && tc.result.error) || 'failed')"></span>
+                    </div>
+                  </template>
                 </div>
                 <!-- Thinking process (collapsible) -->
                 <details x-show="msg.thinking" class="thinking-section" :open="msg.showThinking" @toggle="msg.showThinking=$el.open">
@@ -190,7 +227,7 @@
                   x-html="renderMarkdown(msg.content)"></div>
                 <!-- Main content (JSON with syntax highlighting) -->
                 <div x-show="msg.content && msg.isJson" class="json-content" x-html="highlightJson(msg.content)"></div>
-                <div x-show="!msg.content && !msg.thinking" class="flex items-center gap-2">
+                <div x-show="msg.streaming && !msg.content && !msg.thinking && !(msg.toolCalls && msg.toolCalls.length)" class="flex items-center gap-2">
                   <span class="spinner"></span>
                   <span class="text-xs text-gray-400">Thinking...</span>
                 </div>
@@ -339,11 +376,12 @@
                 <div class="flex-1 h-px bg-slate-200"></div>
               </div>
             </template>
-            <!-- Card visual: time | type+role | duration | drag handle. -->
+            <!-- Card visual: time+duration | type+role | id | drag handle. -->
             <template x-if="item.kind === 'card'">
               <div class="flex items-center gap-3 w-full">
                 <div class="shrink-0 w-12 text-center">
                   <div class="text-xs text-gray-400" x-text="item.seg.startTime"></div>
+                  <div class="text-[10px] text-gray-400 mt-0.5" x-text="item.seg.duration + ' min'"></div>
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
@@ -352,7 +390,7 @@
                   <div class="text-xs text-gray-500" x-text="item.seg.roleTaker || 'No role taker'"></div>
                 </div>
                 <div class="shrink-0 text-right">
-                  <span class="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded" x-text="item.seg.duration + ' min'"></span>
+                  <span class="text-[10px] text-gray-300 font-mono" x-text="item.seg.id"></span>
                 </div>
                 <div class="shrink-0 text-gray-300 cursor-grab">
                   <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M7 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM13 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg>
@@ -437,7 +475,7 @@ function meetingApp() {
 
   return {
     meeting: {
-      meta: { no: null, type: "Regular", theme: "", manager: "", date: "", startTime: "19:15", endTime: "21:30", location: "", introduction: "" },
+      meta: { no: null, type: "Regular", theme: "", manager: "", date: "", startTime: "19:15", endTime: "21:30", location: "", introduction: "", nextSegId: 1 },
       segments: []
     },
     messages: [],
@@ -448,6 +486,7 @@ function meetingApp() {
     resizing: false,
     viewMode: "card",
     showSettings: false,
+    revertPending: null,                                             // msg awaiting confirmation in the revert modal
     testing: false,
     testingProvider: null,
     testResults: {},
@@ -781,6 +820,9 @@ function meetingApp() {
       this.chatInput = "";
 
       this.messages.push({ id: Date.now(), role: "user", content: text });
+      // Hold a proxy reference so we can attach prevAgenda to this specific user message
+      // once (and if) we know the upcoming turn will mutate the agenda.
+      const userMsgRef = this.messages[this.messages.length - 1];
 
       const providerCfg = this.providers[this.activeProvider];
       if (!providerCfg || !providerCfg.apiKey) {
@@ -819,10 +861,10 @@ function meetingApp() {
         // busting prompt-cache prefixes on SYSTEM_PROMPT / tools / prior turns.
         const history = buildHistoryForProvider(this.messages, reqProvider);
         if (this.meeting.segments.length && history.length) {
-          const snapshot = "[Current agenda (live frontend state — trust this over any earlier tool_result):\n" +
+          const snapshot = "[Current agenda (live frontend state — trust this over any earlier tool_result. Each segment has a stable `id` — use it in fine-grained tool args like `segment_id`, `after_id`, `before_id`):\n" +
             JSON.stringify({
-              meta: this.meeting.meta,
-              segments: this.meeting.segments.map(s => ({ type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker }))
+              meta: { no: this.meeting.meta.no, type: this.meeting.meta.type, theme: this.meeting.meta.theme, manager: this.meeting.meta.manager, date: this.meeting.meta.date, startTime: this.meeting.meta.startTime, endTime: this.meeting.meta.endTime, location: this.meeting.meta.location, introduction: this.meeting.meta.introduction },
+              segments: this.meeting.segments.map(s => ({ id: s.id, type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker }))
             }, null, 2) + "\n]\n\n";
           const last = history[history.length - 1];
           if (typeof last.content === "string") {
@@ -838,32 +880,44 @@ function meetingApp() {
         );
 
         if (r1.toolCalls && r1.toolCalls.length) {
+          // Snapshot the pre-turn agenda onto this user message so the UI revert icon can
+          // roll back to exactly this point. Only for mutation-class tool_calls — pure-
+          // information tools (if we add any) wouldn't warrant the icon.
+          const MUTATING_TOOLS = new Set(["create_meeting", "adjust_meeting", "set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"]);
+          if (r1.toolCalls.some(tc => MUTATING_TOOLS.has(tc.name))) {
+            userMsgRef.prevAgenda = this._snapshotAgenda();
+          }
+
+          // All tool_calls of a single router response go into ONE assistant bubble as a
+          // toolCalls[] array — matches the provider APIs' native shape (OpenAI's
+          // assistant.tool_calls, Anthropic's multiple tool_use blocks, Gemini's multiple
+          // functionCall parts).
+          this.streamingMsg.isJson = true;
+          this.streamingMsg.isToolCall = true;
+          this.streamingMsg.thinkingBlocks = r1.thinkingBlocks || [];
+          this.streamingMsg.content = "";                              // discard any partial JSON from the router stream
+          this.streamingMsg.toolCalls = r1.toolCalls.map(tc => ({
+            id: tc.id, name: tc.name, args: tc.args, result: null
+          }));
+
+          // Batch animation setup: fine-grained tools accumulate diffs, one FLIP pass at end.
+          // Mixed batches (e.g. adjust_meeting / restore_agenda) skip — those tools animate themselves.
+          const FINE_GRAINED_BATCH = new Set(["set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"]);
+          const useBatch = r1.toolCalls.every(tc => FINE_GRAINED_BATCH.has(tc.name));
+          if (useBatch) {
+            this._currentAnimCtx = {
+              oldPos: this._captureSegmentPositions(),
+              flashIds: new Set(),
+              newIds: new Set(),
+              fadeClones: []
+            };
+          }
+
           for (let i = 0; i < r1.toolCalls.length; i++) {
             const tc = r1.toolCalls[i];
-
-            // First tool call reuses the current streamingMsg; subsequent ones create fresh bubbles.
-            let bubble = this.streamingMsg;
-            if (i > 0) {
-              bubble = {
-                id: Date.now() + 100 + i, role: "assistant",
-                content: "", thinking: "", showThinking: true,
-                streaming: true, isJson: true
-              };
-              this.messages.push(bubble);
-              this.streamingMsg = bubble;
-              this.scrollChat(true);
-            }
-
-            // Attach tool_use metadata (consumed by buildHistoryForProvider on the next turn).
-            bubble.isToolCall = true;
-            bubble.toolCallId = tc.id;
-            bubble.toolCallName = tc.name;
-            bubble.toolCallArgs = tc.args;
-            bubble.thinkingBlocks = (i === 0 ? r1.thinkingBlocks : []) || [];
-            bubble.content = "";
-            bubble.isJson = true;
-
             const toolResult = await this.executeToolCall(tc, onThinking, onContent);
+            // Update via proxy access so Alpine picks up the mutation and re-renders the row.
+            this.streamingMsg.toolCalls[i].result = toolResult;
 
             this.messages.push({
               id: Date.now() + 1000 + i,
@@ -872,6 +926,12 @@ function meetingApp() {
               toolCallName: tc.name,
               toolResult
             });
+          }
+
+          if (useBatch) {
+            const ctx = this._currentAnimCtx;
+            this._currentAnimCtx = null;
+            this._runFlipAnimation(ctx.oldPos, ctx.flashIds, ctx.newIds, ctx.fadeClones);
           }
         } else {
           // No tool call: parse JSON for backward compatibility, else plain chat.
@@ -906,6 +966,11 @@ function meetingApp() {
     },
 
     async executeToolCall(tc, onThinking, onContent) {
+      // Fine-grained tools: synchronous state mutations, no second LLM call.
+      const FINE_GRAINED = new Set(["set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"]);
+      if (FINE_GRAINED.has(tc.name)) {
+        return this._applyFineGrained(tc);
+      }
       // Executor path: legacy prompts, NO tools (the inner call just generates JSON).
       // Streams into the same onThinking/onContent callbacks so the badge bubble shows live output.
       try {
@@ -976,6 +1041,8 @@ function meetingApp() {
       });
 
       if (!opts.animate) {
+        // Fresh agenda — reset id counter so new segments get clean s1..sN.
+        this.meeting.meta.nextSegId = 1;
         this.meeting.segments = realSegments.map((s, i) => this.enrichSegment(s, i));
         this.deriveBuffers();
         this.refreshDerivedState();
@@ -984,21 +1051,10 @@ function meetingApp() {
       }
 
       // --- Animated path ---
-      const segmentListEl = document.getElementById("segmentList");
       const oldSegs = this.meeting.segments.slice();
+      const oldPos = this._captureSegmentPositions();
 
-      // 1. Capture old positions (by seg.id, using offsetTop — segmentList is position:relative).
-      const oldPos = new Map();
-      if (segmentListEl) {
-        for (const card of segmentListEl.querySelectorAll(".segment-card[data-seg-id]")) {
-          oldPos.set(card.dataset.segId, {
-            top: card.offsetTop, left: card.offsetLeft,
-            width: card.offsetWidth, height: card.offsetHeight
-          });
-        }
-      }
-
-      // 2. Position-tolerant match: same type matched in order. Matched new segs inherit old id.
+      // Position-tolerant match: same type matched in order. Matched new segs inherit old id.
       const buckets = new Map();
       for (const o of oldSegs) {
         if (!buckets.has(o.type)) buckets.set(o.type, []);
@@ -1008,11 +1064,10 @@ function meetingApp() {
       const flashIds = new Set();
       const newIds = new Set();
       const newEnriched = realSegments.map((s, i) => {
-        const enriched = this.enrichSegment(s, i);
         const bucket = buckets.get(s.type);
-        if (bucket && bucket.length) {
-          const matched = bucket.shift();
-          enriched.id = matched.id;
+        const matched = (bucket && bucket.length) ? bucket.shift() : null;
+        const enriched = this.enrichSegment(s, i, matched?.id);
+        if (matched) {
           matchedOldIds.add(matched.id);
           const changed = (matched.roleTaker || "") !== (enriched.roleTaker || "")
                        || (matched.duration || 0) !== (enriched.duration || 0);
@@ -1024,58 +1079,84 @@ function meetingApp() {
       });
       const removedSegs = oldSegs.filter(o => !matchedOldIds.has(o.id));
 
-      // 3. Clone removed cards into segmentList overlay so Alpine can remove the originals
-      //    while visuals keep showing — fade-out starts in $nextTick.
+      // Clone removed cards into segmentList overlay BEFORE mutation so fade-out can happen.
       const fadeClones = [];
-      if (segmentListEl) {
-        for (const r of removedSegs) {
-          const pos = oldPos.get(r.id);
-          const original = segmentListEl.querySelector('.segment-card[data-seg-id="' + r.id + '"]');
-          if (!pos || !original) continue;
-          const clone = original.cloneNode(true);
-          // Strip Alpine bindings so the detached clone doesn't fight reactivity.
-          const strip = (node) => {
-            if (node.nodeType !== 1) return;
-            for (const a of Array.from(node.attributes)) {
-              const n = a.name;
-              if (n.startsWith("x-") || n.startsWith(":") || n.startsWith("@")) node.removeAttribute(n);
-            }
-            for (const c of Array.from(node.children)) strip(c);
-          };
-          strip(clone);
-          Object.assign(clone.style, {
-            position: "absolute",
-            top: pos.top + "px", left: pos.left + "px",
-            width: pos.width + "px",
-            zIndex: "2", pointerEvents: "none", margin: "0"
-          });
-          segmentListEl.appendChild(clone);
-          fadeClones.push(clone);
-        }
+      for (const r of removedSegs) {
+        const clone = this._cloneCardForFadeOut(r.id, oldPos);
+        if (clone) fadeClones.push(clone);
       }
 
-      // 4. Apply new segments — Alpine will diff against reused ids, keeping matched DOM nodes.
+      // Apply new segments — Alpine will diff against reused ids, keeping matched DOM nodes.
       this.meeting.segments = newEnriched;
       this.deriveBuffers();
       this.refreshDerivedState();
       if (this.streamingMsg) this.streamingMsg.segments = this.meeting.segments.length;
 
-      // 5. After Alpine rerender: FLIP moved cards, fade-in new cards, flash changed cards,
-      //    trigger fade-out on clones.
+      this._runFlipAnimation(oldPos, flashIds, newIds, fadeClones);
+    },
+
+    // ---- Animation helpers (used by applyAgendaJSON and fine-grained tool batch) ----
+
+    _captureSegmentPositions() {
+      const el = document.getElementById("segmentList");
+      const pos = new Map();
+      if (!el) return pos;
+      for (const card of el.querySelectorAll(".segment-card[data-seg-id]")) {
+        pos.set(card.dataset.segId, {
+          top: card.offsetTop, left: card.offsetLeft,
+          width: card.offsetWidth, height: card.offsetHeight
+        });
+      }
+      return pos;
+    },
+
+    _cloneCardForFadeOut(segId, oldPos) {
+      // Clone the current DOM card for a to-be-removed segment, strip Alpine bindings,
+      // position absolutely at the old bbox, and attach to segmentList as overlay.
+      const el = document.getElementById("segmentList");
+      if (!el) return null;
+      const card = el.querySelector('.segment-card[data-seg-id="' + segId + '"]');
+      if (!card) return null;
+      const rect = (oldPos && oldPos.get(segId)) || {
+        top: card.offsetTop, left: card.offsetLeft,
+        width: card.offsetWidth, height: card.offsetHeight
+      };
+      const clone = card.cloneNode(true);
+      const strip = (node) => {
+        if (node.nodeType !== 1) return;
+        for (const a of Array.from(node.attributes)) {
+          const n = a.name;
+          if (n.startsWith("x-") || n.startsWith(":") || n.startsWith("@")) node.removeAttribute(n);
+        }
+        for (const c of Array.from(node.children)) strip(c);
+      };
+      strip(clone);
+      Object.assign(clone.style, {
+        position: "absolute",
+        top: rect.top + "px", left: rect.left + "px",
+        width: rect.width + "px",
+        zIndex: "2", pointerEvents: "none", margin: "0"
+      });
+      el.appendChild(clone);
+      return clone;
+    },
+
+    _runFlipAnimation(oldPos, flashIds, newIds, fadeClones) {
+      // Schedule $nextTick work: FLIP moved cards, fade-in new, flash changed, fade-out clones.
       this.$nextTick(() => {
-        const cards = segmentListEl ? segmentListEl.querySelectorAll(".segment-card[data-seg-id]") : [];
+        const el = document.getElementById("segmentList");
+        const cards = el ? el.querySelectorAll(".segment-card[data-seg-id]") : [];
         for (const card of cards) {
           const id = card.dataset.segId;
-          if (newIds.has(id)) {
-            // Fade-in: start hidden + slightly offset, then release to normal.
+          if (newIds && newIds.has(id)) {
             card.style.transition = "none";
             card.style.opacity = "0";
             card.style.transform = "translateY(-10px)";
             card.offsetHeight;
-            card.style.transition = "opacity 800ms ease, transform 800ms ease";
+            card.style.transition = "opacity 1500ms ease, transform 1500ms ease";
             card.style.opacity = "";
             card.style.transform = "";
-          } else {
+          } else if (oldPos) {
             const op = oldPos.get(id);
             if (op) {
               const dy = op.top - card.offsetTop;
@@ -1083,20 +1164,19 @@ function meetingApp() {
                 card.style.transition = "none";
                 card.style.transform = "translateY(" + dy + "px)";
                 card.offsetHeight;
-                card.style.transition = "transform 800ms cubic-bezier(.2,.7,.3,1)";
+                card.style.transition = "transform 1500ms cubic-bezier(.2,.7,.3,1)";
                 card.style.transform = "";
               }
             }
           }
-          if (flashIds.has(id)) {
+          if (flashIds && flashIds.has(id)) {
             card.classList.remove("card-flash");
-            void card.offsetWidth;                                  // restart animation
+            void card.offsetWidth;
             card.classList.add("card-flash");
           }
         }
-        // Clone fade-out: trigger inside nextTick so originals are already removed by Alpine.
-        for (const clone of fadeClones) {
-          clone.style.transition = "opacity 800ms ease, transform 800ms ease";
+        for (const clone of (fadeClones || [])) {
+          clone.style.transition = "opacity 1500ms ease, transform 1500ms ease";
           clone.style.opacity = "0";
           clone.style.transform = "translateY(10px)";
         }
@@ -1105,10 +1185,217 @@ function meetingApp() {
             card.style.transition = ""; card.style.transform = ""; card.style.opacity = "";
             card.classList.remove("card-flash");
           }
-          for (const clone of fadeClones) clone.remove();
-        }, 850);
+          for (const clone of (fadeClones || [])) clone.remove();
+        }, 1550);
       });
     },
+
+    // ---- Fine-grained tool handlers ----
+
+    _applyFineGrained(tc) {
+      // Synchronous mutation + diff accumulation into this._currentAnimCtx.
+      // Returns { success, ...details } or { success: false, error }.
+      const ctx = this._currentAnimCtx;
+      const args = tc.args || {};
+      try {
+        switch (tc.name) {
+          case "set_role": {
+            const seg = this.meeting.segments.find(s => s.id === args.segment_id);
+            if (!seg) throw new Error("Segment not found: " + args.segment_id);
+            const newRole = args.new_role_taker == null ? "" : String(args.new_role_taker);
+            seg.roleTaker = newRole;
+            if (ctx) ctx.flashIds.add(seg.id);
+            return { success: true, segment_id: seg.id, new_role_taker: newRole };
+          }
+          case "swap_roles": {
+            const idA = args.segment_id_a;
+            const idB = args.segment_id_b;
+            if (!idA || !idB) throw new Error("Both segment_id_a and segment_id_b are required");
+            if (idA === idB) throw new Error("Cannot swap a segment with itself");
+            const a = this.meeting.segments.find(s => s.id === idA);
+            const b = this.meeting.segments.find(s => s.id === idB);
+            if (!a) throw new Error("segment_id_a not found: " + idA);
+            if (!b) throw new Error("segment_id_b not found: " + idB);
+            const tmp = a.roleTaker || "";
+            a.roleTaker = b.roleTaker || "";
+            b.roleTaker = tmp;
+            if (ctx) { ctx.flashIds.add(idA); ctx.flashIds.add(idB); }
+            return { success: true, segment_id_a: idA, segment_id_b: idB, a_role: a.roleTaker, b_role: b.roleTaker };
+          }
+          case "set_duration": {
+            const seg = this.meeting.segments.find(s => s.id === args.segment_id);
+            if (!seg) throw new Error("Segment not found: " + args.segment_id);
+            const n = parseInt(args.new_duration_min);
+            if (!Number.isFinite(n) || n <= 0) throw new Error("Invalid new_duration_min: " + args.new_duration_min);
+            seg.duration = n;
+            this.cascadeStartTimes();
+            this.refreshDerivedState();
+            if (ctx) ctx.flashIds.add(seg.id);
+            return { success: true, segment_id: seg.id, new_duration_min: n };
+          }
+          case "add_segment": {
+            const after = args.after_id;
+            const before = args.before_id;
+            if ((after && before) || (!after && !before)) {
+              throw new Error("Provide exactly one of after_id or before_id");
+            }
+            let insertAt;
+            if (after) {
+              const idx = this.meeting.segments.findIndex(s => s.id === after);
+              if (idx < 0) throw new Error("after_id not found: " + after);
+              insertAt = idx + 1;
+            } else {
+              const idx = this.meeting.segments.findIndex(s => s.id === before);
+              if (idx < 0) throw new Error("before_id not found: " + before);
+              insertAt = idx;
+            }
+            const n = parseInt(args.duration_min);
+            if (!Number.isFinite(n) || n <= 0) throw new Error("Invalid duration_min: " + args.duration_min);
+            const enriched = this.enrichSegment({
+              type: args.type || "",
+              duration: n,
+              roleTaker: args.role_taker || ""
+            }, insertAt);
+            this.meeting.segments.splice(insertAt, 0, enriched);
+            this.cascadeStartTimes();
+            this.refreshDerivedState();
+            if (ctx) ctx.newIds.add(enriched.id);
+            return { success: true, new_segment_id: enriched.id, type: enriched.type, duration: enriched.duration, insert_at: insertAt };
+          }
+          case "remove_segment": {
+            const idx = this.meeting.segments.findIndex(s => s.id === args.segment_id);
+            if (idx < 0) throw new Error("Segment not found: " + args.segment_id);
+            if (ctx) {
+              const clone = this._cloneCardForFadeOut(args.segment_id, ctx.oldPos);
+              if (clone) ctx.fadeClones.push(clone);
+            }
+            const removed = this.meeting.segments.splice(idx, 1)[0];
+            this.cascadeStartTimes();
+            this.refreshDerivedState();
+            return { success: true, removed_segment_id: removed.id, removed_type: removed.type };
+          }
+          case "move_segment": {
+            const segId = args.segment_id;
+            const after = args.after_id;
+            const before = args.before_id;
+            if ((after && before) || (!after && !before)) {
+              throw new Error("Provide exactly one of after_id or before_id");
+            }
+            if (after === segId || before === segId) {
+              throw new Error("Cannot move a segment relative to itself");
+            }
+            const srcIdx = this.meeting.segments.findIndex(s => s.id === segId);
+            if (srcIdx < 0) throw new Error("Segment not found: " + segId);
+            let destIdx;
+            if (after) {
+              const t = this.meeting.segments.findIndex(s => s.id === after);
+              if (t < 0) throw new Error("after_id not found: " + after);
+              destIdx = t + 1;
+            } else {
+              const t = this.meeting.segments.findIndex(s => s.id === before);
+              if (t < 0) throw new Error("before_id not found: " + before);
+              destIdx = t;
+            }
+            const [seg] = this.meeting.segments.splice(srcIdx, 1);
+            if (destIdx > srcIdx) destIdx--;
+            this.meeting.segments.splice(destIdx, 0, seg);
+            this.cascadeStartTimes();
+            this.refreshDerivedState();
+            if (ctx) ctx.flashIds.add(seg.id);
+            return { success: true, segment_id: seg.id, new_index: destIdx };
+          }
+          case "swap_time": {
+            const idA = args.segment_id_a;
+            const idB = args.segment_id_b;
+            if (!idA || !idB) throw new Error("Both segment_id_a and segment_id_b are required");
+            if (idA === idB) throw new Error("Cannot swap a segment with itself");
+            const ia = this.meeting.segments.findIndex(s => s.id === idA);
+            const ib = this.meeting.segments.findIndex(s => s.id === idB);
+            if (ia < 0) throw new Error("segment_id_a not found: " + idA);
+            if (ib < 0) throw new Error("segment_id_b not found: " + idB);
+            const a = this.meeting.segments[ia];
+            const b = this.meeting.segments[ib];
+            // Swap array positions, then ALSO swap bufferBefore values — a buffer is a gap
+            // at a POSITION (between pos-1 and pos), not a property of the segment itself.
+            // Without this, the buffer would travel with the segment and disappear/appear
+            // at the wrong boundaries.
+            this.meeting.segments[ia] = b;
+            this.meeting.segments[ib] = a;
+            const bufA = a.bufferBefore || 0;
+            a.bufferBefore = b.bufferBefore || 0;
+            b.bufferBefore = bufA;
+            this.cascadeStartTimes();
+            this.refreshDerivedState();
+            if (ctx) { ctx.flashIds.add(idA); ctx.flashIds.add(idB); }
+            return { success: true, segment_id_a: idA, segment_id_b: idB, new_index_a: ib, new_index_b: ia };
+          }
+          case "set_buffer": {
+            const seg = this.meeting.segments.find(s => s.id === args.segment_id);
+            if (!seg) throw new Error("Segment not found: " + args.segment_id);
+            const n = parseInt(args.buffer_min);
+            if (!Number.isFinite(n) || n < 0) throw new Error("Invalid buffer_min: " + args.buffer_min);
+            seg.bufferBefore = n;
+            this.cascadeStartTimes();
+            this.refreshDerivedState();
+            if (ctx) ctx.flashIds.add(seg.id);
+            return { success: true, segment_id: seg.id, buffer_min: n };
+          }
+          case "set_meta": {
+            const field = args.field;
+            const allowed = ["theme", "location", "date", "start_time", "no", "manager", "introduction"];
+            if (!allowed.includes(field)) {
+              throw new Error("Unknown field: " + field + ". Supported: " + allowed.join(", "));
+            }
+            const key = field === "start_time" ? "startTime" : field;
+            if (field === "no") {
+              const n = parseInt(args.value);
+              this.meeting.meta.no = isNaN(n) ? args.value : n;
+            } else {
+              this.meeting.meta[key] = args.value == null ? "" : String(args.value);
+            }
+            if (field === "start_time") this.cascadeStartTimes();
+            this.refreshDerivedState();
+            return { success: true, field, value: this.meeting.meta[key] };
+          }
+          default:
+            throw new Error("Unknown fine-grained tool: " + tc.name);
+        }
+      } catch (e) {
+        return { success: false, error: e.message || String(e) };
+      }
+    },
+
+    _snapshotAgenda() {
+      // Deep-copied agenda state attached to a user message right before its turn mutates
+      // the agenda. Used by the UI revert icon (revertToMessage). nextSegId is intentionally
+      // excluded — it's a counter, not user-visible state; restoring it could cause id collisions.
+      const metaSnap = { ...this.meeting.meta };
+      delete metaSnap.nextSegId;
+      return {
+        meta: metaSnap,
+        segments: JSON.parse(JSON.stringify(this.meeting.segments))
+      };
+    },
+
+    revertToMessage(msg) {
+      // Opens the custom revert-confirm modal; the actual restore runs from confirmRevert().
+      if (!msg || !msg.prevAgenda) return;
+      this.revertPending = msg;
+    },
+
+    confirmRevert() {
+      const msg = this.revertPending;
+      this.revertPending = null;
+      if (!msg || !msg.prevAgenda) return;
+      this.applyAgendaJSON(msg.prevAgenda, { animate: true });
+      const idx = this.messages.findIndex(m => m.id === msg.id);
+      if (idx >= 0) this.messages.splice(idx, this.messages.length - idx);
+      this.chatInput = msg.content || "";
+      this.loading = false;
+      this.streamingMsg = null;
+    },
+
+    cancelRevert() { this.revertPending = null; },
 
     fullAgendaSnapshot() {
       // Returned as tool_result payload. Full state (not a summary) so the router can
@@ -1135,7 +1422,7 @@ function meetingApp() {
       };
     },
 
-    enrichSegment(s, idx) {
+    enrichSegment(s, idx, presetId) {
       const segType = s.type || "";
       // Color by keyword first — robust to LLM wording variations:
       //   "evaluation" → Evaluators (yellow); "speech" / "workshop" → Speakers (orange).
@@ -1147,8 +1434,12 @@ function meetingApp() {
       if (lower.includes("evaluation")) color = "#eab308";
       else if (lower.includes("speech") || lower.includes("workshop")) color = "#f97316";
       else color = def.color || "#94a3b8";
+      // Short stable id: "s" + monotonic counter on meta.nextSegId. Matched segs
+      // pass presetId through; new segs take the next counter value and bump it.
+      const id = presetId || ("s" + (this.meeting.meta.nextSegId || 1));
+      if (!presetId) this.meeting.meta.nextSegId = (this.meeting.meta.nextSegId || 1) + 1;
       return {
-        id: "seg_" + String(idx).padStart(3, "0") + "_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
+        id,
         type: segType,
         startTime: s.startTime || s.start_time || "",
         duration: parseInt(s.duration) || def.defaultDuration || 5,
@@ -1418,6 +1709,21 @@ function meetingApp() {
       this.loading = false;
     },
 
+    formatToolArgs(args) {
+      if (!args || typeof args !== "object") return "";
+      const pairs = [];
+      for (const [k, v] of Object.entries(args)) {
+        if (v == null) continue;
+        let s;
+        if (typeof v === "string") s = JSON.stringify(v);
+        else if (typeof v === "object") s = JSON.stringify(v);
+        else s = String(v);
+        if (s.length > 80) s = s.slice(0, 77) + "...";
+        pairs.push(k + "=" + s);
+      }
+      return pairs.join("  ");
+    },
+
     renderMarkdown(content) {
       if (!content) return "";
       if (typeof marked === "undefined") {
@@ -1584,7 +1890,8 @@ function meetingApp() {
           startTime: "19:15",
           endTime: "21:30",
           location: "JOININ HUB, 6th Xin'an Rd, Bao'an",
-          introduction: "Imagine a world where half the women you meet are over 50..."
+          introduction: "Imagine a world where half the women you meet are over 50...",
+          nextSegId: 23
         },
         segments: [
           { id: "s1", type: "Guests Registration", startTime: "19:15", duration: 15, roleTaker: "All", isOptional: false, color: "#94a3b8" },
