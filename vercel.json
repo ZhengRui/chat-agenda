@@ -1,6 +1,6 @@
 {
   "rewrites": [
-    { "source": "/", "destination": "/meeting-flow.html" }
+    { "source": "/", "destination": "/chat-agenda.html" }
   ],
   "headers": [
     {

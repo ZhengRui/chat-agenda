@@ -12,7 +12,7 @@
 
 - **新建** `app-1/tools.js` — 工具注册表 + 三家 schema adapter
 - **修改** `app-1/prompts.js` — 新增 `SYSTEM_PROMPT`，保留旧 prompt 供 executor 用
-- **修改** `app-1/meeting-flow.html` — streaming tool_call 累积、body builder 加 tools、sendMessage 重构、消息历史转换、UI 更新
+- **修改** `app-1/chat-agenda.html` — streaming tool_call 累积、body builder 加 tools、sendMessage 重构、消息历史转换、UI 更新
 
 ## Key Design — Tool Registry 驱动
 

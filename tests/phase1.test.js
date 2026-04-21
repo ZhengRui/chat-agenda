@@ -132,8 +132,8 @@ test("Legacy prompts still exported unchanged", () => {
   assert.ok(loaded.CLUB_MEMBERS.length >= 10);
 });
 
-test("meeting-flow.html: tools.js tag is present AND after prompts.js", () => {
-  const html = readApp("meeting-flow.html");
+test("chat-agenda.html: tools.js tag is present AND after prompts.js", () => {
+  const html = readApp("chat-agenda.html");
   const pIdx = html.indexOf('<script src="prompts.js"></script>');
   const tIdx = html.indexOf('<script src="tools.js"></script>');
   assert.ok(pIdx > 0, "prompts.js script tag missing");
