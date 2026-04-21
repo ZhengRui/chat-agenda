@@ -79,7 +79,7 @@ test("adjust_meeting present and consistent across all three schemas", () => {
 });
 
 test("Fine-grained tools present across all three adapters", () => {
-  const FINE = ["set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"];
+  const FINE = ["set_role", "set_type", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"];
   for (const name of FINE) {
     const inReg = loaded.TOOL_REGISTRY.some(t => t.name === name);
     const inOai = loaded.TOOLS_OPENAI.some(t => t.function.name === name);

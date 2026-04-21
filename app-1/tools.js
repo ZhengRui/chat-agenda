@@ -33,6 +33,21 @@ const TOOL_REGISTRY = [
     required: ["segment_id", "new_role_taker"]
   },
   {
+    name: "set_type",
+    description: "UNILATERAL: rename ONE segment's type/title (e.g. 'Prepared Speech' → 'Ice Breaker', 'Table Topics' → '桌上话题'). Keeps id, duration, position, roleTaker, buffers unchanged. Card color may recompute automatically based on the new type's keywords.",
+    params: {
+      segment_id: {
+        type: "string",
+        description: "Segment id from the current agenda snapshot (e.g. 's3', 's10')."
+      },
+      new_type: {
+        type: "string",
+        description: "New type/title, verbatim as the user wants it displayed."
+      }
+    },
+    required: ["segment_id", "new_type"]
+  },
+  {
     name: "swap_roles",
     description: "BIDIRECTIONAL: swap the role takers of TWO segments — atomic exchange of only the roleTaker field, positions and times do NOT change. Use for 'swap A and B's roles', 'Frank 和 Joyce 的角色互换'. Does NOT move the cards.",
     params: {

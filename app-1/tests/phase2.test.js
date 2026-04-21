@@ -202,14 +202,19 @@ test("Gemini: single-part functionCall produces one tool_call with generated id"
   assert.match(r.toolCalls[0].id, /^gemini_/);
 });
 
-test("Gemini: functionCall split across chunks merges by name", () => {
+test("Gemini: repeated same-name functionCall parts produce separate tool_calls (parallel calls)", () => {
+  // Previously these got merged by name — that collapsed real parallel calls
+  // (e.g. two set_role for different segments) into one. Each functionCall part
+  // is atomic, so treat them as independent tool_calls in arrival order.
   const st = s.createGeminiState();
-  s.handleGeminiChunk(st, geminiChunk([{ functionCall: { name: "create_meeting", args: { raw_text: "part1" } } }]), () => {}, () => {});
-  s.handleGeminiChunk(st, geminiChunk([{ functionCall: { name: "create_meeting", args: { extra: "part2" } } }]), () => {}, () => {});
+  s.handleGeminiChunk(st, geminiChunk([{ functionCall: { name: "set_role", args: { segment_id: "s3", new_role_taker: "Frank" } } }]), () => {}, () => {});
+  s.handleGeminiChunk(st, geminiChunk([{ functionCall: { name: "set_role", args: { segment_id: "s5", new_role_taker: "Joyce" } } }]), () => {}, () => {});
   const r = s.finalizeGeminiState(st);
-  assert.equal(r.toolCalls.length, 1);
-  assert.equal(r.toolCalls[0].args.raw_text, "part1");
-  assert.equal(r.toolCalls[0].args.extra, "part2");
+  assert.equal(r.toolCalls.length, 2);
+  assert.equal(r.toolCalls[0].args.segment_id, "s3");
+  assert.equal(r.toolCalls[0].args.new_role_taker, "Frank");
+  assert.equal(r.toolCalls[1].args.segment_id, "s5");
+  assert.equal(r.toolCalls[1].args.new_role_taker, "Joyce");
 });
 
 test("Gemini: two different functionCalls produce two tool_calls in arrival order", () => {

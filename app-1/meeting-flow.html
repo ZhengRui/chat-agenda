@@ -616,7 +616,7 @@ function meetingApp() {
         model: localStorage.getItem("mf_gem_model") || "gemini-2.5-flash-lite",
         reasoningEffort: localStorage.getItem("mf_gem_effort") || "high",
         thinkingEnabled: localStorage.getItem("mf_gem_thinking") !== "false",
-        presetModels: ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash-lite", "gemini-3-deep-think"]
+        presetModels: ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash-lite", "gemini-3-deep-think"]
       }
     },
 
@@ -1092,7 +1092,7 @@ function meetingApp() {
 
     async executeToolCall(tc, onThinking, onContent) {
       // Fine-grained tools: synchronous state mutations, no second LLM call.
-      const FINE_GRAINED = new Set(["set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"]);
+      const FINE_GRAINED = new Set(["set_role", "set_type", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"]);
       if (FINE_GRAINED.has(tc.name)) {
         return this._applyFineGrained(tc);
       }
@@ -1331,6 +1331,21 @@ function meetingApp() {
             seg.roleTaker = newRole;
             if (ctx) ctx.flashIds.add(seg.id);
             return { success: true, segment_id: seg.id, new_role_taker: newRole };
+          }
+          case "set_type": {
+            const seg = this.meeting.segments.find(s => s.id === args.segment_id);
+            if (!seg) throw new Error("Segment not found: " + args.segment_id);
+            const newType = args.new_type == null ? "" : String(args.new_type).trim();
+            if (!newType) throw new Error("new_type must be a non-empty string");
+            seg.type = newType;
+            // Recompute color from keyword rules (enrichSegment's logic). Keeping it in sync
+            // means renaming "Prepared Speech" → "Ice Breaker Game" will drop the orange tint.
+            const idx = this.meeting.segments.indexOf(seg);
+            const re = this.enrichSegment({ type: newType, duration: seg.duration, roleTaker: seg.roleTaker }, idx, seg.id);
+            seg.color = re.color;
+            seg.isOptional = re.isOptional;
+            if (ctx) ctx.flashIds.add(seg.id);
+            return { success: true, segment_id: seg.id, new_type: newType };
           }
           case "swap_roles": {
             const idA = args.segment_id_a;

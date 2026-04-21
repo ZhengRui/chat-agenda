@@ -127,15 +127,15 @@ function finalizeAnthropicState(state) {
 }
 
 // ---- Gemini ----
-// Parts arrive inside candidates[0].content.parts. `functionCall` may appear
-// once or split across multiple chunks; merge by name.
+// Parts arrive inside candidates[0].content.parts. Each `functionCall` part is a
+// complete atomic unit — do NOT merge by name, or parallel calls with the same
+// tool (e.g. two set_role, two set_type) collapse into one.
 
 function createGeminiState() {
   return {
     content: "",
     thinkingBlocks: [],
-    toolCallsByName: new Map(),
-    _toolCallOrder: []
+    toolCalls: []
   };
 }
 
@@ -150,25 +150,17 @@ function handleGeminiChunk(state, chunk, onThinking, onContent) {
       state.content += part.text;
       onContent(part.text);
     } else if (part.functionCall) {
-      const name = part.functionCall.name;
-      let acc = state.toolCallsByName.get(name);
-      if (!acc) {
-        acc = {
-          id: "gemini_" + Date.now() + "_" + state._toolCallOrder.length,
-          name,
-          args: {}
-        };
-        state.toolCallsByName.set(name, acc);
-        state._toolCallOrder.push(name);
-      }
-      if (part.functionCall.args && typeof part.functionCall.args === "object") {
-        Object.assign(acc.args, part.functionCall.args);
-      }
+      state.toolCalls.push({
+        id: "gemini_" + Date.now() + "_" + state.toolCalls.length,
+        name: part.functionCall.name,
+        args: (part.functionCall.args && typeof part.functionCall.args === "object")
+          ? { ...part.functionCall.args }
+          : {}
+      });
     }
   }
 }
 
 function finalizeGeminiState(state) {
-  const toolCalls = state._toolCallOrder.map(n => state.toolCallsByName.get(n));
-  return { content: state.content, toolCalls, thinkingBlocks: state.thinkingBlocks };
+  return { content: state.content, toolCalls: state.toolCalls, thinkingBlocks: state.thinkingBlocks };
 }

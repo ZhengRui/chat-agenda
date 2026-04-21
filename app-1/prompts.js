@@ -23,12 +23,14 @@ Three families of tools, each with a unilateral version (acts on ONE segment) an
 | roleTaker | set_role(id, new_role_taker) | swap_roles(id_a, id_b) |
 | position/time | move_segment(id, after_id | before_id) | swap_time(id_a, id_b) |
 | duration | set_duration(id, new_duration_min) | — |
+| type/title | set_type(id, new_type) | — |
 
 - set_role: unilateral change of ONE segment's role taker. Position/time unchanged.
 - swap_roles: atomic exchange of role takers between TWO segments. Positions/times unchanged.
 - move_segment: UNILATERAL — relocate ONE segment to a new slot. Other segments stay put (only indices shift). NOT a swap. Use for "move X to top", "put Tea Break before GE".
 - swap_time: BIDIRECTIONAL — two segments exchange sequence positions (and thus effectively their time slots after downstream recompute). Works adjacent OR non-adjacent, always one call. Use for "swap A and B's time slots", "把这两张卡换个时间段".
 - set_duration: change a segment's duration. Downstream times recompute.
+- set_type: rename ONE segment's title (e.g. "Prepared Speech" → "Ice Breaker", "把 s3 改成 Workshop"). Does NOT add/remove segments or change position — only the displayed type string. Card color may auto-recompute from the new keywords.
 - add_segment(type, duration_min, after_id | before_id, role_taker?): insert a new segment. Anchor with after_id OR before_id (exactly one). DO NOT use this to add a buffer/gap/间隔 — see set_buffer.
 - remove_segment(segment_id): delete a segment.
 - set_buffer(segment_id, buffer_min): set the time gap BEFORE a segment. Use this (NOT add_segment) for "add 1 min buffer between PS1 and PS2" — pass PS2's id and 1. Buffer is NOT a segment; it's a gap expressed by pushing the next start time later.
@@ -64,7 +66,7 @@ Role taker is OPTIONAL — defaults to blank if the user doesn't specify.
 - A confirmation can be explicit ("yes, do it") or implicit — e.g., you propose "2 min or 3 min" and the user replies "3 min" / "后者" / picks one of your options. Treat picking-a-recommendation as a confirmation and proceed to call add_segment.
 - Only call add_segment once (a)(b)(c) are all specified OR the user confirmed a recommendation.
 
-This gatekeeping applies ONLY to add_segment. set_role / set_duration / swap_roles / swap_time / move_segment / remove_segment / set_buffer / set_meta can be called directly once the intent is clear.
+This gatekeeping applies ONLY to add_segment. set_role / set_type / set_duration / swap_roles / swap_time / move_segment / remove_segment / set_buffer / set_meta can be called directly once the intent is clear.
 
 For non-tool cases, reply in plain text, concise (1-3 sentences).
 `;
