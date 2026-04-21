@@ -185,7 +185,20 @@ function historyToGemini(messages) {
       i++;
     }
   }
-  return out;
+  // Gemini requires strict user/model alternation. If the assistant didn't emit a text
+  // reply after a tool call (common — most fine-grained tools have silent results), we
+  // end up with consecutive user turns: functionResponse user turn + next user text turn.
+  // Merge runs of consecutive same-role turns into a single turn with concatenated parts.
+  const merged = [];
+  for (const turn of out) {
+    const last = merged[merged.length - 1];
+    if (last && last.role === turn.role) {
+      last.parts = last.parts.concat(turn.parts);
+    } else {
+      merged.push(turn);
+    }
+  }
+  return merged;
 }
 
 function buildHistoryForProvider(messages, provider, limit = HISTORY_DEFAULT_LIMIT) {

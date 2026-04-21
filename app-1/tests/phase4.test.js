@@ -285,6 +285,47 @@ test("Gemini map: multi functionCall + grouped functionResponse parts", () => {
   assert.equal(out[1].parts[1].functionResponse.name, "set_duration");
 });
 
+test("Gemini map: merges consecutive user turns (functionResponse + next user text)", () => {
+  // Regression: Gemini rejects contents with two user turns in a row. When an assistant
+  // tool call isn't followed by a text reply (typical for fine-grained tools), the
+  // functionResponse user turn is immediately followed by the NEXT user's text turn.
+  // Expect them merged into a single user turn with both parts.
+  const out = h.historyToGemini([
+    { role: "user", content: "delete s25" },
+    assistantToolCall([{ id: "a", name: "remove_segment", args: { segment_id: "s25" } }]),
+    { role: "tool", toolCallId: "a", toolCallName: "remove_segment", toolResult: { success: true } },
+    { role: "user", content: "now delete all buffers" }
+  ]);
+  // Expected turns: user(text) -> model(functionCall) -> user(functionResponse + text)
+  assert.equal(out.length, 3);
+  assert.equal(out[0].role, "user");
+  assert.equal(out[1].role, "model");
+  assert.equal(out[2].role, "user");
+  // Merged user turn carries BOTH the functionResponse and the next user's text.
+  assert.equal(out[2].parts.length, 2);
+  assert.ok(out[2].parts[0].functionResponse);
+  assert.equal(out[2].parts[0].functionResponse.name, "remove_segment");
+  assert.equal(out[2].parts[1].text, "now delete all buffers");
+});
+
+test("Gemini map: role alternation holds across multiple silent tool rounds", () => {
+  // Longer scenario: two tool rounds in a row with no text replies. Must still
+  // alternate user/model strictly after merging.
+  const out = h.historyToGemini([
+    { role: "user", content: "u1" },
+    assistantToolCall([{ id: "a1", name: "set_role", args: {} }]),
+    { role: "tool", toolCallId: "a1", toolCallName: "set_role", toolResult: { ok: 1 } },
+    { role: "user", content: "u2" },
+    assistantToolCall([{ id: "a2", name: "set_role", args: {} }]),
+    { role: "tool", toolCallId: "a2", toolCallName: "set_role", toolResult: { ok: 1 } },
+    { role: "user", content: "u3" }
+  ]);
+  // Every adjacent pair must differ in role.
+  for (let i = 1; i < out.length; i++) {
+    assert.notEqual(out[i].role, out[i - 1].role, `roles at ${i - 1}/${i} must alternate`);
+  }
+});
+
 test("Gemini map: non-object toolResult gets wrapped as { result: ... }", () => {
   const out = h.historyToGemini([
     { role: "tool", toolCallId: "c1", toolCallName: "x", toolResult: "plain string" }
