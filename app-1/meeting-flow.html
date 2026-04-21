@@ -30,6 +30,18 @@
   .resize-handle::before { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 32px; height: 3px; background: #d1d5db; border-radius: 2px; transition: background 0.15s; }
   .resize-handle:hover::before, .resize-handle.active::before { background: #3b82f6; }
   body.resizing * { user-select: none !important; cursor: row-resize !important; }
+  /* Mobile: chat panel floats at the bottom with a draggable top bar. */
+  @media (max-width: 767px) {
+    .chat-panel-mobile {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+      border-right: 0; border-top: 1px solid #e5e7eb;
+      box-shadow: 0 -6px 20px -6px rgba(15,23,42,0.18);
+      width: 100% !important; min-width: 0 !important;
+      border-top-left-radius: 14px; border-top-right-radius: 14px;
+    }
+    .chat-top-bar { touch-action: none; }
+    .chat-top-bar.dragging .chat-grip { background: #3b82f6; }
+  }
   .json-content { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 11px; white-space: pre-wrap; background: #1e293b; color: #e2e8f0; padding: 10px 14px; border-radius: 8px; max-height: 560px; overflow-y: auto; line-height: 1.5; }
   .timeline-bar { transition: all 0.2s ease; cursor: pointer; min-width: 4px; }
   .timeline-bar:hover { filter: brightness(0.9); }
@@ -217,29 +229,29 @@
   </div>
 
   <!-- Header -->
-  <header class="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0 z-10">
-    <div class="flex items-center gap-3">
-      <h1 class="text-lg font-bold text-gray-800">Meeting Flow</h1>
-      <span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">v0.4</span>
+  <header class="bg-white border-b border-gray-200 px-3 md:px-4 py-2 flex items-center justify-between shrink-0 z-10">
+    <div class="flex items-center gap-2 md:gap-3 min-w-0">
+      <h1 class="text-base md:text-lg font-bold text-gray-800 truncate">Meeting Flow</h1>
+      <span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded hidden sm:inline">v0.4</span>
     </div>
-    <div class="flex items-center gap-1">
-      <button @click="showSettings=true" class="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Settings">
+    <div class="flex items-center gap-0.5 md:gap-1 shrink-0">
+      <button @click="showSettings=true" class="p-1.5 md:p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Settings">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/>
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
         </svg>
       </button>
-      <div class="w-px h-5 bg-gray-200 mx-1"></div>
-      <button class="p-2 rounded-lg bg-blue-100 text-blue-700" title="Cards view">
+      <div class="w-px h-5 bg-gray-200 mx-1 hidden md:block"></div>
+      <button class="p-1.5 md:p-2 rounded-lg bg-blue-100 text-blue-700" title="Cards view">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m0 0a2.246 2.246 0 00-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0121 12v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6c0-.98.626-1.813 1.5-2.122"/>
         </svg>
       </button>
-      <div class="w-px h-5 bg-gray-200 mx-1"></div>
-      <button @click="exportJSON()" class="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Export JSON">
+      <div class="w-px h-5 bg-gray-200 mx-1 hidden md:block"></div>
+      <button @click="exportJSON()" class="p-1.5 md:p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Export JSON">
         <span class="block w-5 h-5 flex items-center justify-center font-mono font-bold text-[16px] leading-none">{}</span>
       </button>
-      <button @click="exportImage()" class="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Export Image">
+      <button @click="exportImage()" class="p-1.5 md:p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Export Image">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/>
         </svg>
@@ -250,11 +262,32 @@
   <!-- Main Content -->
   <div class="flex flex-1 overflow-hidden">
     <!-- Left: Chat Panel -->
-    <div class="w-[35%] min-w-[360px] border-r border-gray-200 bg-white flex flex-col">
-      <div class="p-3 border-b border-gray-100 bg-gray-50">
+    <div class="md:w-[35%] md:min-w-[360px] md:border-r border-gray-200 bg-white flex flex-col"
+         :class="isMobile ? 'chat-panel-mobile' : ''"
+         :style="isMobile ? ('height:' + (chatMobileCollapsed ? 48 : chatMobileHeightVh) + (chatMobileCollapsed ? 'px' : 'vh')) : ''">
+      <!-- Mobile top bar: drag grip (centered, full-width drag zone) + preset buttons (absolute right). -->
+      <div x-show="isMobile" class="chat-top-bar md:hidden shrink-0 border-b border-gray-100 bg-white rounded-t-[14px] select-none relative"
+           :class="chatResizing ? 'dragging' : ''">
+        <div class="relative flex items-center justify-center h-11 cursor-row-resize"
+             @mousedown="startChatResize($event)" @touchstart="startChatResize($event)">
+          <span class="chat-grip block w-12 h-1.5 bg-gray-300 rounded-full transition-colors"></span>
+          <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1"
+               @mousedown.stop @touchstart.stop>
+            <button @click="setChatPreset('collapse')" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Collapse">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <button @click="setChatPreset('third')" class="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-semibold text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="1/3 height">⅓</button>
+            <button @click="setChatPreset('half')" class="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-semibold text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="1/2 height">½</button>
+            <button @click="setChatPreset('max')" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Maximize">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div x-show="!isMobile" class="p-3 border-b border-gray-100 bg-gray-50">
         <p class="text-xs text-gray-500 mb-2">Paste WeChat registration text below, then chat to fine-tune the agenda.</p>
       </div>
-      <div class="flex-1 overflow-y-auto p-3 space-y-3" id="chatMessages" x-ref="chatContainer">
+      <div x-show="!isMobile || !chatMobileCollapsed" class="flex-1 overflow-y-auto p-3 space-y-3 min-h-0" id="chatMessages" x-ref="chatContainer">
         <template x-for="msg in messages" :key="msg.id">
           <div class="chat-message">
             <!-- System/Info message -->
@@ -321,13 +354,15 @@
           </div>
         </template>
       </div>
-      <!-- Resize handle -->
-      <div class="resize-handle" :class="{ active: resizing }"
+      <!-- Resize handle (desktop only — mobile panel resizes via top-bar grip) -->
+      <div x-show="!isMobile" class="resize-handle" :class="{ active: resizing }"
         @mousedown="startResize($event)"></div>
-      <div class="p-3 border-t border-gray-200 flex flex-col" :style="'height:' + inputHeight + 'px'">
+      <div x-show="!isMobile || !chatMobileCollapsed" class="p-2 md:p-3 border-t border-gray-200 flex flex-col"
+        :style="isMobile ? '' : ('height:' + inputHeight + 'px')"
+        :class="isMobile ? 'shrink-0' : ''">
         <!-- Provider & Model selector -->
-        <div class="flex items-center gap-2 mb-2 shrink-0">
-          <select x-model="activeProvider" class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+        <div class="flex items-center gap-1.5 md:gap-2 mb-1 md:mb-2 shrink-0 text-[10px] md:text-xs">
+          <select x-model="activeProvider" class="border rounded-md px-1.5 py-0.5 md:px-2 md:py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
             <template x-for="(cfg, name) in providers" :key="name">
               <option :value="name" x-text="name" :disabled="!cfg.apiKey"></option>
             </template>
@@ -336,19 +371,19 @@
           <select x-show="activeProvider !== 'deepseek'"
             x-effect="syncSelect($el, providers[activeProvider])"
             @change="providers[activeProvider].model = $el.value"
-            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none flex-1">
+            class="border rounded-md px-1.5 py-0.5 md:px-2 md:py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none flex-1 min-w-0">
             <template x-for="m in providers[activeProvider].presetModels" :key="m">
               <option :value="m" x-text="m"></option>
             </template>
             <option value="__custom__">Other (custom)...</option>
           </select>
-          <span x-show="activeProvider === 'deepseek'" class="text-xs text-gray-500 px-2 py-1 flex-1">model1</span>
+          <span x-show="activeProvider === 'deepseek'" class="text-gray-500 px-1.5 py-0.5 md:px-2 md:py-1 flex-1 min-w-0 truncate">model1</span>
           <input x-show="activeProvider !== 'deepseek' && providers[activeProvider].model === '__custom__'"
             x-model="providers[activeProvider]._customModel"
             @input="providers[activeProvider].model = $el.value"
             placeholder="Custom model..."
-            class="text-xs border rounded-md px-2 py-1 flex-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
-          <label class="flex items-center gap-1.5 select-none"
+            class="border rounded-md px-1.5 py-0.5 md:px-2 md:py-1 flex-1 min-w-0 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none">
+          <label class="flex items-center gap-1 md:gap-1.5 select-none"
             :class="mustThink(activeProvider, providers[activeProvider].model) ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'"
             :title="mustThink(activeProvider, providers[activeProvider].model) ? 'This model always thinks' : 'Enable thinking'">
             <div class="relative">
@@ -357,16 +392,16 @@
                 @change="providers[activeProvider].thinkingEnabled = $el.checked"
                 :disabled="mustThink(activeProvider, providers[activeProvider].model)"
                 class="sr-only peer">
-              <div class="w-8 h-4 bg-gray-300 peer-checked:bg-blue-500 rounded-full transition"></div>
-              <div class="absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition peer-checked:translate-x-4"></div>
+              <div class="w-7 h-3.5 md:w-8 md:h-4 bg-gray-300 peer-checked:bg-blue-500 rounded-full transition"></div>
+              <div class="absolute left-0.5 top-0.5 w-2.5 h-2.5 md:w-3 md:h-3 bg-white rounded-full transition peer-checked:translate-x-3.5 md:peer-checked:translate-x-4"></div>
             </div>
-            <span class="text-xs text-gray-600">think</span>
+            <span class="text-gray-600">think</span>
           </label>
           <select x-show="activeProvider === 'deepseek'"
             x-model="providers[activeProvider].reasoningEffort"
             :disabled="!effectiveThinking(activeProvider, providers[activeProvider])"
             title="Reasoning effort"
-            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none disabled:opacity-40 disabled:cursor-not-allowed">
+            class="border rounded-md px-1.5 py-0.5 md:px-2 md:py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none disabled:opacity-40 disabled:cursor-not-allowed">
             <option value="high">high</option>
             <option value="max">max</option>
           </select>
@@ -374,7 +409,7 @@
             x-model="providers[activeProvider].reasoningEffort"
             :disabled="!effectiveThinking(activeProvider, providers[activeProvider])"
             title="Reasoning effort"
-            class="text-xs border rounded-md px-2 py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none disabled:opacity-40 disabled:cursor-not-allowed">
+            class="border rounded-md px-1.5 py-0.5 md:px-2 md:py-1 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none disabled:opacity-40 disabled:cursor-not-allowed">
             <option value="low">low</option>
             <option value="medium">medium</option>
             <option value="high">high</option>
@@ -385,8 +420,8 @@
         <div class="flex gap-2 flex-1">
           <textarea x-model="chatInput" @keydown.enter.prevent="handleEnter($event)"
             placeholder="Paste WeChat text or type adjustment... (Enter to send, Shift+Enter for new line)"
-            class="flex-1 border rounded-xl px-4 py-2 text-sm resize-y focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none"
-            rows="5" :disabled="loading"></textarea>
+            class="flex-1 border rounded-xl px-3 md:px-4 py-1.5 md:py-2 text-xs md:text-sm resize-y focus:ring-2 focus:ring-blue-400 focus:border-blue-400 outline-none"
+            :rows="isMobile ? 2 : 5" :disabled="loading"></textarea>
           <button @click="sendMessage()" x-show="!loading" :disabled="!chatInput.trim()"
             class="shrink-0 w-10 h-10 bg-blue-500 text-white rounded-full flex items-center justify-center hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
@@ -400,7 +435,8 @@
     </div>
 
     <!-- Right: Visualization -->
-    <div class="flex-1 overflow-y-auto p-4 bg-gray-50" id="vizPanel" x-ref="vizPanel">
+    <div class="flex-1 overflow-y-auto p-4 bg-gray-50" id="vizPanel" x-ref="vizPanel"
+         :style="isMobile ? ('padding-bottom:' + (chatMobileCollapsed ? 60 : Math.round(window.innerHeight * chatMobileHeightVh / 100) + 20) + 'px') : ''">
       <!-- Empty State -->
       <div x-show="!meeting.segments.length" class="h-full flex items-center justify-center">
         <div class="text-center text-gray-400">
@@ -530,6 +566,10 @@ function meetingApp() {
     inputHeight: 180,
     resizing: false,
     viewMode: "card",
+    isMobile: false,
+    chatMobileHeightVh: 50,
+    chatMobileCollapsed: false,
+    chatResizing: false,
     showSettings: false,
     revertPending: null,                                             // msg awaiting confirmation in the revert modal
     showExportModal: false,
@@ -593,6 +633,10 @@ function meetingApp() {
       this.$watch("viewMode", () => {
         if (this.viewMode === "timeline") this.$nextTick(() => this.updateTimelinePositions());
       });
+      const mq = window.matchMedia("(max-width: 767px)");
+      const syncMq = () => { this.isMobile = mq.matches; };
+      syncMq();
+      mq.addEventListener ? mq.addEventListener("change", syncMq) : mq.addListener(syncMq);
     },
 
     get segmentCount() { return this.meeting.segments.length; },
@@ -695,11 +739,40 @@ function meetingApp() {
         chosenClass: "sortable-chosen",
         onStart: (evt) => {
           // Freeze the layout: snapshot children once; onMove below cancels all reorders.
-          this._dragChildren = Array.from(el.children).filter(c => c !== this._dropLine);
+          // Exclude Sortable's fallback ghost clone — it's a real sibling with the same
+          // `segment-card` / `data-kind` / `data-seg-idx` attrs as the original (cloneNode
+          // copied them), which would otherwise cause the segments iteration in onEnd to
+          // push the dragged segment TWICE (once from the real card, once from the ghost).
+          this._dragChildren = Array.from(el.children).filter(c =>
+            c !== this._dropLine && !c.classList.contains("sortable-fallback")
+          );
           this._dropZone = null;
           if (!this._dropLine) {
             this._dropLine = document.createElement("div");
             this._dropLine.className = "drop-line";
+          }
+          // Fallback mode only (touch / devtools emulation): Sortable clones dragEl into a
+          // ghost that floats with the pointer. The clone is outside the x-for scope, so
+          // Alpine throws `item is not defined` on every `:xxx` / `x-text` inside it.
+          // MUST strip synchronously — Alpine's MutationObserver fires in a microtask;
+          // RAF/setTimeout run after Alpine has already bound (and thrown).
+          // Use `evt.item !== node` to guarantee we never touch the real dragEl (which
+          // keeps its Alpine bindings so the card re-renders correctly after drop).
+          const fromHtml5 = evt.originalEvent && evt.originalEvent.type === "dragstart";
+          if (!fromHtml5) {
+            const matches = document.querySelectorAll(".sortable-fallback.sortable-drag, .sortable-drag");
+            const strip = (node) => {
+              if (node.nodeType !== 1) return;
+              for (const attr of Array.from(node.attributes)) {
+                const n = attr.name;
+                if (n.startsWith("x-") || n.startsWith(":") || n.startsWith("@")) node.removeAttribute(n);
+              }
+              for (const child of Array.from(node.children)) strip(child);
+              if (node.tagName === "TEMPLATE" && node.content) {
+                for (const child of Array.from(node.content.children)) strip(child);
+              }
+            };
+            matches.forEach((n) => { if (n !== evt.item) strip(n); });
           }
         },
         onMove: (evt) => {
@@ -783,8 +856,10 @@ function meetingApp() {
           // FLIP animation: capture each card's current bbox (keyed by stable seg.id),
           // mutate state, then after Alpine rerender apply an inverse transform and transition
           // it back to zero — the browser animates position change smoothly.
+          // Skip Sortable's fallback ghost — its data-seg-id matches the dragged card, so
+          // Map.set would overwrite the real rect with the ghost's finger-position rect.
           const firstRects = new Map();
-          for (const card of el.querySelectorAll(".segment-card[data-seg-id]")) {
+          for (const card of el.querySelectorAll(".segment-card[data-seg-id]:not(.sortable-fallback)")) {
             firstRects.set(card.dataset.segId, card.getBoundingClientRect());
           }
 
@@ -1852,6 +1927,43 @@ function meetingApp() {
       };
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
+    },
+
+    startChatResize(e) {
+      if (e.cancelable) e.preventDefault();
+      const touch = e.touches && e.touches[0];
+      const startY = touch ? touch.clientY : e.clientY;
+      const startVh = this.chatMobileCollapsed ? 8 : this.chatMobileHeightVh;
+      const vh = window.innerHeight / 100;
+      this.chatResizing = true;
+      this.chatMobileCollapsed = false;
+      const onMove = (ev) => {
+        const t = ev.touches && ev.touches[0];
+        const y = t ? t.clientY : ev.clientY;
+        const deltaVh = (startY - y) / vh;
+        const next = Math.max(8, Math.min(92, startVh + deltaVh));
+        this.chatMobileHeightVh = next;
+        this.chatMobileCollapsed = next < 12;
+      };
+      const onUp = () => {
+        this.chatResizing = false;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        document.removeEventListener("touchmove", onMove);
+        document.removeEventListener("touchend", onUp);
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+      document.addEventListener("touchmove", onMove, { passive: false });
+      document.addEventListener("touchend", onUp);
+    },
+
+    setChatPreset(preset) {
+      if (preset === "collapse") { this.chatMobileCollapsed = true; return; }
+      this.chatMobileCollapsed = false;
+      if (preset === "third") this.chatMobileHeightVh = 33;
+      else if (preset === "half") this.chatMobileHeightVh = 50;
+      else if (preset === "max") this.chatMobileHeightVh = 92;
     },
 
     saveSettings() {
