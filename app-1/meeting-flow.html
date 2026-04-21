@@ -156,21 +156,94 @@
     </div>
   </div>
 
+  <!-- Export JSON modal -->
+  <div x-cloak x-show="showExportModal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center" @click.self="showExportModal=false" @keydown.escape.window="showExportModal=false">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col" @click.stop>
+      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+        <h2 class="text-base font-semibold text-gray-800">Export JSON</h2>
+        <div class="flex items-center gap-2">
+          <span x-show="exportCopied" class="text-xs text-green-600 font-medium">Copied!</span>
+          <button @click="copyExportJSON()" class="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition" title="Copy to clipboard">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+            </svg>
+          </button>
+          <button @click="showExportModal=false" class="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Close">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-0">
+        <pre class="json-content m-0 rounded-none" style="max-height: none;" x-text="exportText"></pre>
+      </div>
+      <div class="px-5 py-3 border-t border-gray-100 flex justify-end gap-2">
+        <button @click="downloadExportJSON()" class="px-4 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Download .json</button>
+        <button @click="showExportModal=false" class="px-4 py-1.5 text-xs font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Image modal -->
+  <div x-cloak x-show="showImageModal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center" @click.self="showImageModal=false" @keydown.escape.window="showImageModal=false">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col" @click.stop>
+      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+        <h2 class="text-base font-semibold text-gray-800">Export Image</h2>
+        <button @click="showImageModal=false" class="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Close">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
+        <template x-if="!exportImageDataUrl">
+          <div class="h-40 flex items-center justify-center">
+            <div class="flex flex-col items-center gap-2 text-gray-400">
+              <span class="spinner"></span>
+              <span class="text-xs">Rendering...</span>
+            </div>
+          </div>
+        </template>
+        <template x-if="exportImageDataUrl">
+          <img :src="exportImageDataUrl" class="max-w-full h-auto rounded-lg shadow mx-auto" alt="Agenda preview">
+        </template>
+      </div>
+      <div class="px-5 py-3 border-t border-gray-100 flex justify-end gap-2">
+        <button @click="downloadExportImage()" :disabled="!exportImageDataUrl" class="px-4 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed">Download .png</button>
+        <button @click="showImageModal=false" class="px-4 py-1.5 text-xs font-medium text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Header -->
   <header class="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between shrink-0 z-10">
     <div class="flex items-center gap-3">
       <h1 class="text-lg font-bold text-gray-800">Meeting Flow</h1>
       <span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">v0.4</span>
     </div>
-    <div class="flex items-center gap-2">
-      <button @click="loadDemo()" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Load Demo</button>
-      <button @click="showSettings=true" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Settings</button>
-      <div class="w-px h-5 bg-gray-200"></div>
-      <button @click="viewMode='card'" class="px-3 py-1.5 text-xs font-medium rounded-lg transition" :class="viewMode==='card' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'">Cards</button>
-      <button @click="viewMode='timeline'" class="px-3 py-1.5 text-xs font-medium rounded-lg transition" :class="viewMode==='timeline' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'">Timeline</button>
-      <div class="w-px h-5 bg-gray-200"></div>
-      <button @click="exportJSON()" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Export JSON</button>
-      <button @click="exportImage()" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Export Image</button>
+    <div class="flex items-center gap-1">
+      <button @click="showSettings=true" class="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Settings">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </button>
+      <div class="w-px h-5 bg-gray-200 mx-1"></div>
+      <button class="p-2 rounded-lg bg-blue-100 text-blue-700" title="Cards view">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 6.878V6a2.25 2.25 0 012.25-2.25h7.5A2.25 2.25 0 0118 6v.878m-12 0c.235-.083.487-.128.75-.128h10.5c.263 0 .515.045.75.128m-12 0A2.25 2.25 0 004.5 9v.878m13.5-3A2.25 2.25 0 0119.5 9v.878m0 0a2.246 2.246 0 00-.75-.128H5.25c-.263 0-.515.045-.75.128m15 0A2.25 2.25 0 0121 12v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6c0-.98.626-1.813 1.5-2.122"/>
+        </svg>
+      </button>
+      <div class="w-px h-5 bg-gray-200 mx-1"></div>
+      <button @click="exportJSON()" class="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Export JSON">
+        <span class="block w-5 h-5 flex items-center justify-center font-mono font-bold text-[16px] leading-none">{}</span>
+      </button>
+      <button @click="exportImage()" class="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition" title="Export Image">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/>
+        </svg>
+      </button>
     </div>
   </header>
 
@@ -401,34 +474,6 @@
         </template>
       </div>
 
-      <!-- Timeline View -->
-      <div x-show="viewMode==='timeline' && meeting.segments.length" class="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-        <div class="relative" style="padding-top: 20px;">
-          <!-- Time axis -->
-          <div class="relative h-8 mb-1 border-b border-gray-200">
-            <template x-for="tick in timelineTicks" :key="tick.label">
-              <div class="absolute text-[10px] text-gray-400 -top-4" :style="'left:' + tick.pct + '%'">
-                <div class="w-px h-2 bg-gray-300 absolute top-3 left-1/2"></div>
-                <span x-text="tick.label"></span>
-              </div>
-            </template>
-          </div>
-          <!-- Timeline rows -->
-          <div class="space-y-1">
-            <template x-for="seg in meeting.segments" :key="seg.id">
-              <div class="relative h-8 group">
-                <div class="timeline-bar absolute rounded-sm h-6 top-1 flex items-center px-2 overflow-hidden"
-                  :style="'left:' + seg._timelinePct + '%; width:' + Math.max(seg._timelineWidth, 1) + '%; background-color:' + seg.color">
-                  <span class="text-[10px] text-white font-medium truncate drop-shadow" x-text="seg.type"></span>
-                </div>
-                <!-- Tooltip on hover -->
-                <div class="hidden group-hover:block absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-10"
-                  x-text="seg.type + ' | ' + seg.startTime + ' | ' + seg.duration + 'min | ' + (seg.roleTaker || 'N/A')"></div>
-              </div>
-            </template>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -487,6 +532,11 @@ function meetingApp() {
     viewMode: "card",
     showSettings: false,
     revertPending: null,                                             // msg awaiting confirmation in the revert modal
+    showExportModal: false,
+    exportText: "",
+    exportCopied: false,                                             // flips true briefly after "Copied!" feedback
+    showImageModal: false,
+    exportImageDataUrl: "",                                          // data URL of the rendered agenda PNG
     testing: false,
     testingProvider: null,
     testResults: {},
@@ -826,7 +876,7 @@ function meetingApp() {
 
       const providerCfg = this.providers[this.activeProvider];
       if (!providerCfg || !providerCfg.apiKey) {
-        this.messages.push({ id: Date.now() + 1, role: "assistant", content: "Please configure your API key in Settings first. Or click 'Load Demo' to see an example." });
+        this.messages.push({ id: Date.now() + 1, role: "assistant", content: "Please configure your API key in Settings first." });
         this.scrollChat(true);
         return;
       }
@@ -1856,11 +1906,50 @@ function meetingApp() {
     },
 
     exportJSON() {
+      // Shape mirrors the prompt example: flat top-level meta fields (snake_case) + a
+      // segments array with {type, start_time, duration, role_taker}. No "meta" wrapper.
+      const m = this.meeting.meta;
       const data = {
-        meta: this.meeting.meta,
-        segments: this.meeting.segments.map(s => ({ type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker }))
+        no: m.no,
+        type: m.type,
+        theme: m.theme,
+        manager: m.manager,
+        date: m.date,
+        start_time: m.startTime,
+        end_time: m.endTime,
+        location: m.location,
+        introduction: m.introduction,
+        segments: this.meeting.segments.map(s => ({
+          type: s.type,
+          start_time: s.startTime,
+          duration: s.duration,
+          role_taker: s.roleTaker
+        }))
       };
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      this.exportText = JSON.stringify(data, null, 2);
+      this.exportCopied = false;
+      this.showExportModal = true;
+    },
+
+    async copyExportJSON() {
+      try {
+        await navigator.clipboard.writeText(this.exportText);
+        this.exportCopied = true;
+        setTimeout(() => { this.exportCopied = false; }, 1500);
+      } catch (e) {
+        // Fallback for older browsers / insecure contexts: select + execCommand.
+        const ta = document.createElement("textarea");
+        ta.value = this.exportText;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); this.exportCopied = true; setTimeout(() => { this.exportCopied = false; }, 1500); }
+        catch (_) { /* ignore */ }
+        ta.remove();
+      }
+    },
+
+    downloadExportJSON() {
+      const blob = new Blob([this.exportText], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1870,13 +1959,42 @@ function meetingApp() {
     },
 
     exportImage() {
+      // Open the preview modal immediately with a loading state; fill in the image once ready.
+      this.exportImageDataUrl = "";
+      this.showImageModal = true;
+
       const el = this.$refs.vizPanel;
-      html2canvas(el, { scale: 2, backgroundColor: "#f9fafb" }).then(canvas => {
-        const link = document.createElement("a");
-        link.download = "meeting_" + (this.meeting.meta.no || "agenda") + ".png";
-        link.href = canvas.toDataURL("image/png");
-        link.click();
+      const savedScroll = el.scrollTop;
+      el.scrollTop = 0;
+      html2canvas(el, {
+        scale: 2,
+        backgroundColor: "#f9fafb",
+        height: el.scrollHeight,
+        windowHeight: el.scrollHeight,
+        onclone: (doc) => {
+          // html2canvas crops the top of letters inside `overflow: hidden` text-truncate
+          // spans. For the export-only clone, open up overflow and keep the text on one line.
+          doc.querySelectorAll("#vizPanel .truncate").forEach(n => {
+            n.style.overflow = "visible";
+            n.style.textOverflow = "clip";
+          });
+        }
+      }).then(canvas => {
+        el.scrollTop = savedScroll;
+        this.exportImageDataUrl = canvas.toDataURL("image/png");
+      }).catch(err => {
+        el.scrollTop = savedScroll;
+        console.error("[Export Image] failed", err);
+        this.showImageModal = false;
       });
+    },
+
+    downloadExportImage() {
+      if (!this.exportImageDataUrl) return;
+      const link = document.createElement("a");
+      link.download = "meeting_" + (this.meeting.meta.no || "agenda") + ".png";
+      link.href = this.exportImageDataUrl;
+      link.click();
     },
 
     loadDemo() {
