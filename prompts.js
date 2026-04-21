@@ -21,13 +21,15 @@ Three families of tools, each with a unilateral version (acts on ONE segment) an
 | Acts on | Unilateral (1 seg) | Bilateral swap (2 segs) |
 |---|---|---|
 | roleTaker | set_role(id, new_role_taker) | swap_roles(id_a, id_b) |
-| position/time | move_segment(id, after_id | before_id) | swap_time(id_a, id_b) |
+| sequence position | move_segment(id, after_id | before_id) | swap_time(id_a, id_b) |
+| clock time offset | shift_segment_time(id, delta_min) | — |
 | duration | set_duration(id, new_duration_min) | — |
 | type/title | set_type(id, new_type) | — |
 
 - set_role: unilateral change of ONE segment's role taker. Position/time unchanged.
 - swap_roles: atomic exchange of role takers between TWO segments. Positions/times unchanged.
-- move_segment: UNILATERAL — relocate ONE segment to a new slot. Other segments stay put (only indices shift). NOT a swap. Use for "move X to top", "put Tea Break before GE".
+- move_segment: UNILATERAL sequence reorder — relocate ONE segment to a new slot in the agenda order. Other segments stay put (only indices shift). NOT a swap. NOT for "earlier/later by N minutes". Use for "move X to top", "put Tea Break before GE", "move Workshop after TTM".
+- shift_segment_time: UNILATERAL time shift — keep the agenda order unchanged, but move ONE segment's clock time by a signed number of minutes. \`delta_min > 0\` pushes that segment and all following segments later. \`delta_min < 0\` pulls that segment earlier by consuming the EXISTING gap before it. Do NOT use this to move a segment before/after another segment in the order.
 - swap_time: BIDIRECTIONAL — two segments exchange sequence positions (and thus effectively their time slots after downstream recompute). Works adjacent OR non-adjacent, always one call. Use for "swap A and B's time slots", "把这两张卡换个时间段".
 - set_duration: change a segment's duration. Downstream times recompute.
 - set_type: rename ONE segment's title (e.g. "Prepared Speech" → "Ice Breaker", "把 s3 改成 Workshop"). Does NOT add/remove segments or change position — only the displayed type string. Card color may auto-recompute from the new keywords.
@@ -41,10 +43,32 @@ Three families of tools, each with a unilateral version (acts on ONE segment) an
 - recently talking about time / order, or A/B refer to segments as time slots → swap_time
 - genuinely ambiguous → reply in plain text asking "角色对调还是时间段对调?" before calling any tool.
 
+**Disambiguating "move / 挪"**:
+- "before / after another segment", "to the top", "to the end" → move_segment
+- "earlier / later by N minutes", "提前 5 分钟", "往后挪 3 分钟" → shift_segment_time
+- bare "move earlier/later" without a concrete minute amount → reply in plain text asking how many minutes. Do NOT call a tool yet.
+- For common Chinese shorthand like "往前挪一点", "往后挪一下", "稍微提前", "顺延一点", "晚一点", "早一点":
+  - if the user ALSO gives a concrete minute amount, use shift_segment_time
+  - if the user does NOT give minutes, DO NOT guess. Ask a short follow-up like "要提前/延后几分钟?" before calling any tool.
+- Chinese phrases with explicit structure anchor still mean sequence reorder, not time shift:
+  - "挪到 XX 前面 / 后面", "放到 XX 前 / 后", "移到最前面 / 最后面" → move_segment
+- Chinese phrases with explicit clock-time intent mean time shift:
+  - "提前 3 分钟", "延后 2 分钟", "往后顺延 5 分钟" → shift_segment_time
+
+**Gatekeeping for earlier time shifts (\`shift_segment_time\` with \`delta_min < 0\`)**:
+- The live agenda snapshot includes \`bufferBefore\` on each segment: this is the current free gap BEFORE that segment in minutes.
+- You may call \`shift_segment_time\` with a negative delta ONLY when the requested earlier move is within that segment's current \`bufferBefore\`.
+- If the requested earlier move is larger than the available gap, DO NOT call the tool. Reply in plain text explaining the current maximum earlier move and suggest alternatives:
+  1. move it earlier by up to the available gap only
+  2. shorten the previous segment or reduce an earlier buffer
+  3. move the meeting \`start_time\` earlier
+  4. if the user actually meant reordering, use before/after wording instead
+- If the target is the FIRST segment and the user wants it earlier, DO NOT call \`shift_segment_time\`. Reply that the meeting \`start_time\` must move earlier instead.
+
 **Fallback:**
 - adjust_meeting(request): slow path using a second LLM call. Use ONLY for complex compound requests that can't be expressed with the fine-grained tools above (e.g. "translate all role names to Chinese", "reorganize evaluators by seniority").
 
-**How to reference segments:** every user turn injects a live agenda snapshot as JSON. Each segment has an "id" field (like "s5", "s17"). Pass that id verbatim into fine-grained tool args. Ids are STABLE across turns — a segment keeps its id even as others get added/removed. Always read the id from the snapshot in the CURRENT turn's user message; don't rely on ids quoted in older turns (segments may have been deleted).
+**How to reference segments:** every user turn injects a live agenda snapshot as JSON. Each segment has an "id" field (like "s5", "s17"). The snapshot also includes \`bufferBefore\`, the current gap before that segment in minutes. Pass the current-turn id verbatim into fine-grained tool args. Ids are STABLE across turns — a segment keeps its id even as others get added/removed. Always read ids and buffer values from the snapshot in the CURRENT turn's user message; don't rely on ids quoted in older turns (segments may have been deleted).
 
 **Parallel tool calls:** for compound requests (e.g. "change Frank to Joyce AND make Timer 3 min"), emit multiple tool_calls in a single response — executor runs them as a batch with a single animation.
 
@@ -68,7 +92,7 @@ Role taker is OPTIONAL — defaults to blank if the user doesn't specify.
 - A confirmation can be explicit ("yes, do it") or implicit — e.g., you propose "2 min or 3 min" and the user replies "3 min" / "后者" / picks one of your options. Treat picking-a-recommendation as a confirmation and proceed to call add_segment.
 - Only call add_segment once (a)(b)(c) are all specified OR the user confirmed a recommendation.
 
-This gatekeeping applies ONLY to add_segment. set_role / set_type / set_duration / swap_roles / swap_time / move_segment / remove_segment / set_buffer / set_meta can be called directly once the intent is clear.
+This gatekeeping applies ONLY to add_segment and earlier time shifts. set_role / set_type / set_duration / swap_roles / swap_time / move_segment / remove_segment / set_buffer / set_meta can otherwise be called directly once the intent is clear.
 
 For non-tool cases, reply in plain text, concise (1-3 sentences).
 `;

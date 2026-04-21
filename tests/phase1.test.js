@@ -26,6 +26,7 @@ test("TOOL_REGISTRY has at least create_meeting and adjust_meeting", () => {
   const names = loaded.TOOL_REGISTRY.map((t) => t.name);
   assert.ok(names.includes("create_meeting"));
   assert.ok(names.includes("adjust_meeting"));
+  assert.ok(names.includes("shift_segment_time"));
 });
 
 test("Every registry entry has description + params + required", () => {
@@ -79,7 +80,7 @@ test("adjust_meeting present and consistent across all three schemas", () => {
 });
 
 test("Fine-grained tools present across all three adapters", () => {
-  const FINE = ["set_role", "set_type", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"];
+  const FINE = ["set_role", "set_type", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "shift_segment_time", "swap_time", "set_buffer", "set_meta"];
   for (const name of FINE) {
     const inReg = loaded.TOOL_REGISTRY.some(t => t.name === name);
     const inOai = loaded.TOOLS_OPENAI.some(t => t.function.name === name);
@@ -90,6 +91,14 @@ test("Fine-grained tools present across all three adapters", () => {
     assert.ok(inAnth, `${name} missing from TOOLS_ANTHROPIC`);
     assert.ok(inGem, `${name} missing from TOOLS_GEMINI`);
   }
+});
+
+test("shift_segment_time exposes signed delta_min and segment_id as required", () => {
+  const shift = loaded.TOOL_REGISTRY.find(t => t.name === "shift_segment_time");
+  assert.ok(shift, "shift_segment_time missing from TOOL_REGISTRY");
+  assert.equal(shift.params.segment_id.type, "string");
+  assert.equal(shift.params.delta_min.type, "integer");
+  assert.deepEqual([...shift.required].sort(), ["delta_min", "segment_id"]);
 });
 
 test("add_segment exposes after_id + before_id (optional) and type/duration_min required", () => {
@@ -119,8 +128,16 @@ test("SYSTEM_PROMPT exists, non-trivial, mentions both tools and at least one no
   assert.ok(loaded.SYSTEM_PROMPT.length > 200, "SYSTEM_PROMPT too short");
   assert.ok(loaded.SYSTEM_PROMPT.includes("create_meeting"));
   assert.ok(loaded.SYSTEM_PROMPT.includes("adjust_meeting"));
+  assert.ok(loaded.SYSTEM_PROMPT.includes("shift_segment_time"));
   // Must explicitly tell the model when NOT to call a tool.
   assert.match(loaded.SYSTEM_PROMPT, /do not|don't|NOT/i);
+});
+
+test("SYSTEM_PROMPT covers Chinese shorthand for earlier/later moves without minutes", () => {
+  assert.ok(loaded.SYSTEM_PROMPT.includes("往前挪一点"));
+  assert.ok(loaded.SYSTEM_PROMPT.includes("往后挪一下"));
+  assert.ok(loaded.SYSTEM_PROMPT.includes("要提前/延后几分钟?"));
+  assert.ok(loaded.SYSTEM_PROMPT.includes("挪到 XX 前面 / 后面"));
 });
 
 test("Legacy prompts still exported unchanged", () => {
@@ -132,11 +149,13 @@ test("Legacy prompts still exported unchanged", () => {
   assert.ok(loaded.CLUB_MEMBERS.length >= 10);
 });
 
-test("chat-agenda.html: tools.js tag is present AND after prompts.js", () => {
+test("chat-agenda.html: tools.js and timing.js tags are present after prompts.js", () => {
   const html = readApp("chat-agenda.html");
   const pIdx = html.indexOf('<script src="prompts.js"></script>');
   const tIdx = html.indexOf('<script src="tools.js"></script>');
+  const timingIdx = html.indexOf('<script src="timing.js"></script>');
   assert.ok(pIdx > 0, "prompts.js script tag missing");
   assert.ok(tIdx > 0, "tools.js script tag missing");
   assert.ok(tIdx > pIdx, "tools.js must load after prompts.js");
+  assert.ok(timingIdx > tIdx, "timing.js must load after tools.js");
 });

@@ -117,7 +117,7 @@ const TOOL_REGISTRY = [
   },
   {
     name: "move_segment",
-    description: "UNILATERAL move: relocate ONE existing segment to a new position. The other segments stay put — only their indices shift to make room. This is NOT a swap. Use this for 'move X to the top', 'put Tea Break before GE', 'move the workshop to after TTM'. For exchanging two segments' positions, use swap_segments instead. Keeps id/type/duration/role unchanged. Downstream start times recompute.",
+    description: "UNILATERAL sequence move: relocate ONE existing segment to a new position in the agenda order. The other segments stay put — only their indices shift to make room. This is NOT a swap, and it is NOT for 'earlier/later by N minutes'. Use this for 'move X to the top', 'put Tea Break before GE', 'move the workshop to after TTM'. For exchanging two segments' positions, use swap_time instead. Keeps id/type/duration/role unchanged. Downstream start times recompute.",
     params: {
       segment_id: {
         type: "string",
@@ -133,6 +133,21 @@ const TOOL_REGISTRY = [
       }
     },
     required: ["segment_id"]
+  },
+  {
+    name: "shift_segment_time",
+    description: "UNILATERAL clock-time shift: move ONE segment earlier or later by a signed number of minutes while keeping the agenda order unchanged. Positive delta_min pushes this segment and all following segments later. Negative delta_min pulls this segment earlier by consuming the EXISTING gap before it. Do NOT use this for moving a segment before/after another segment in the order — use move_segment instead.",
+    params: {
+      segment_id: {
+        type: "string",
+        description: "Segment id from the current agenda snapshot."
+      },
+      delta_min: {
+        type: "integer",
+        description: "Signed integer minutes. Positive = later. Negative = earlier."
+      }
+    },
+    required: ["segment_id", "delta_min"]
   },
   {
     name: "swap_time",

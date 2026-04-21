@@ -28,6 +28,7 @@ This repo is intentionally lightweight. There is no build step and no package ma
 - [builders.js](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/builders.js) builds request bodies for different providers and reasoning modes.
 - [streaming.js](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/streaming.js) parses SSE streams and reconstructs content, thinking, and tool calls.
 - [history.js](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/history.js) converts the app's internal message format into provider-specific chat history.
+- [timing.js](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/timing.js) contains the pure rules for shifting a segment earlier or later without violating existing gaps.
 - [tests](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/tests) contains Node-based tests for the pure JS modules.
 - [vercel.json](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/vercel.json) rewrites `/` to `chat-agenda.html` for deployment.
 
@@ -76,6 +77,7 @@ The current suite covers:
 - SSE parsing and tool-call reconstruction in [streaming.js](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/streaming.js)
 - Provider body builders in [builders.js](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/builders.js)
 - Conversation history mapping in [history.js](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/history.js)
+- Time-shift conflict rules in [timing.js](/Users/zerry/Work/Projects/funs/lmm/chat-agenda/timing.js)
 
 ## Manual Smoke Test
 
@@ -173,7 +175,11 @@ Suggested chat sequence:
    Example type: `Rename Victory's prepared speech to Ice Breaker.`
    Example role taker: `Change IE3 to Catherine Yang.`
    Expected result: the assistant uses `set_duration`, `set_type`, or `set_role` as appropriate.
-8. Test start-time changes carefully.
+8. Shift a segment earlier or later by a concrete number of minutes.
+   Example later: `Move Zack's evaluation 2 min later.`
+   Example earlier: `Move Rui's evaluation 1 min earlier.`
+   Expected result: later moves push that segment and the rest of the agenda later; earlier moves only work when there is enough free gap before the segment, otherwise the assistant should explain the conflict and suggest alternatives.
+9. Test start-time changes carefully.
    There is no dedicated segment-level `set_start_time` tool in the current app.
    To test start-time changes, use supported operations that recompute downstream times, such as `move_segment`, `swap_time`, `set_buffer`, `set_duration`, or meeting-level `set_meta(start_time)`.
    Example: `Set the meeting start time to 19:20.` or `Add a 1 min buffer before Zack's evaluation.`

@@ -15,6 +15,7 @@
 <script src="builders.js"></script>
 <script src="streaming.js"></script>
 <script src="history.js"></script>
+<script src="timing.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/json.min.js"></script>
@@ -318,6 +319,9 @@
                         x-text="formatToolArgs(tc.args)"></span>
                       <span x-show="tc.result && tc.result.success === false" class="text-[10px] text-red-500"
                         x-text="'✗ ' + ((tc.result && tc.result.error) || 'failed')"></span>
+                      <div x-show="tc.result && tc.result.success === false && formatToolAdvice(tc.result)"
+                        class="basis-full text-[10px] text-gray-500 whitespace-pre-wrap leading-relaxed"
+                        x-text="formatToolAdvice(tc.result)"></div>
                     </div>
                   </template>
                 </div>
@@ -988,7 +992,7 @@ function meetingApp() {
           const snapshot = "[Current agenda (live frontend state — trust this over any earlier tool_result. Each segment has a stable `id` — use it in fine-grained tool args like `segment_id`, `after_id`, `before_id`):\n" +
             JSON.stringify({
               meta: { no: this.meeting.meta.no, type: this.meeting.meta.type, theme: this.meeting.meta.theme, manager: this.meeting.meta.manager, date: this.meeting.meta.date, startTime: this.meeting.meta.startTime, endTime: this.meeting.meta.endTime, location: this.meeting.meta.location, introduction: this.meeting.meta.introduction },
-              segments: this.meeting.segments.map(s => ({ id: s.id, type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker }))
+              segments: this.meeting.segments.map(s => ({ id: s.id, type: s.type, startTime: s.startTime, duration: s.duration, roleTaker: s.roleTaker, bufferBefore: s.bufferBefore || 0 }))
             }, null, 2) + "\n]\n\n";
           prependToLatestUserTextTurn(history, snapshot);
         }
@@ -1002,7 +1006,7 @@ function meetingApp() {
           // Snapshot the pre-turn agenda onto this user message so the UI revert icon can
           // roll back to exactly this point. Only for mutation-class tool_calls — pure-
           // information tools (if we add any) wouldn't warrant the icon.
-          const MUTATING_TOOLS = new Set(["create_meeting", "adjust_meeting", "set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"]);
+          const MUTATING_TOOLS = new Set(["create_meeting", "adjust_meeting", "set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "shift_segment_time", "swap_time", "set_buffer", "set_meta"]);
           if (r1.toolCalls.some(tc => MUTATING_TOOLS.has(tc.name))) {
             userMsgRef.prevAgenda = this._snapshotAgenda();
           }
@@ -1015,7 +1019,7 @@ function meetingApp() {
 
           // Batch animation setup: fine-grained tools accumulate diffs, one FLIP pass at end.
           // Mixed batches (e.g. adjust_meeting / restore_agenda) skip — those tools animate themselves.
-          const FINE_GRAINED_BATCH = new Set(["set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"]);
+          const FINE_GRAINED_BATCH = new Set(["set_role", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "shift_segment_time", "swap_time", "set_buffer", "set_meta"]);
           const useBatch = r1.toolCalls.every(tc => FINE_GRAINED_BATCH.has(tc.name));
           if (useBatch) {
             this._currentAnimCtx = {
@@ -1046,6 +1050,7 @@ function meetingApp() {
             this._currentAnimCtx = null;
             this._runFlipAnimation(ctx.oldPos, ctx.flashIds, ctx.newIds, ctx.fadeClones);
           }
+          this.appendToolFailureMessages(assistantMsg);
 
           this.finalizeAssistantMessage(assistantMsg, {
             provider: reqProvider, model: reqModel, effort: reqEffort, thinking: reqThinking
@@ -1089,7 +1094,7 @@ function meetingApp() {
 
     async executeToolCall(tc, onThinking, onContent) {
       // Fine-grained tools: synchronous state mutations, no second LLM call.
-      const FINE_GRAINED = new Set(["set_role", "set_type", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "swap_time", "set_buffer", "set_meta"]);
+      const FINE_GRAINED = new Set(["set_role", "set_type", "swap_roles", "set_duration", "add_segment", "remove_segment", "move_segment", "shift_segment_time", "swap_time", "set_buffer", "set_meta"]);
       if (FINE_GRAINED.has(tc.name)) {
         return this._applyFineGrained(tc);
       }
@@ -1441,6 +1446,38 @@ function meetingApp() {
             if (ctx) ctx.flashIds.add(seg.id);
             return { success: true, segment_id: seg.id, new_index: destIdx };
           }
+          case "shift_segment_time": {
+            const segId = args.segment_id;
+            const segIdx = this.meeting.segments.findIndex(s => s.id === segId);
+            if (segIdx < 0) throw new Error("Segment not found: " + segId);
+            const seg = this.meeting.segments[segIdx];
+            const analysis = analyzeShiftSegment(this.meeting.segments, segIdx, args.delta_min);
+            if (!analysis.ok) {
+              return buildShiftConflictResult(seg, analysis);
+            }
+
+            const delta = parseInt(args.delta_min, 10);
+            if (delta === 0) {
+              return { success: true, segment_id: seg.id, delta_min: 0, start_time: seg.startTime };
+            }
+            if (segIdx === 0) {
+              const [ah, am] = (this.meeting.meta.startTime || "19:15").split(":").map(Number);
+              const anchorMin = ah * 60 + am + delta;
+              this.meeting.meta.startTime = String(Math.floor(anchorMin / 60)).padStart(2, "0") + ":" + String(anchorMin % 60).padStart(2, "0");
+            } else {
+              seg.bufferBefore = (seg.bufferBefore || 0) + delta;
+            }
+            this.cascadeStartTimes();
+            this.refreshDerivedState();
+            if (ctx) ctx.flashIds.add(seg.id);
+            return {
+              success: true,
+              segment_id: seg.id,
+              delta_min: delta,
+              direction: delta > 0 ? "later" : "earlier",
+              start_time: seg.startTime
+            };
+          }
           case "swap_time": {
             const idA = args.segment_id_a;
             const idB = args.segment_id_b;
@@ -1659,6 +1696,16 @@ function meetingApp() {
       }));
     },
 
+    appendToolFailureMessages(msg) {
+      const failures = (msg.toolCalls || [])
+        .map(tc => tc && tc.result)
+        .filter(r => r && r.success === false && r.user_message);
+      if (!failures.length) return;
+      const text = [...new Set(failures.map(r => r.user_message))].join("\n\n");
+      msg.content = msg.content ? (msg.content + "\n\n" + text) : text;
+      msg.isJson = false;
+    },
+
     finalizeAssistantMessage(msg, meta, startedAt) {
       msg.streaming = false;
       const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1) + "s";
@@ -1705,6 +1752,7 @@ function meetingApp() {
                 toolResult
               });
             }
+            this.appendToolFailureMessages(followMsg);
             this.finalizeAssistantMessage(followMsg, reqMeta, followStart);
             continue;
           }
@@ -1977,6 +2025,17 @@ function meetingApp() {
         pairs.push(k + "=" + s);
       }
       return pairs.join("  ");
+    },
+
+    formatToolAdvice(result) {
+      if (!result || result.success !== false) return "";
+      const pieces = [];
+      if (Array.isArray(result.suggestions) && result.suggestions.length) {
+        pieces.push("Suggestions: " + result.suggestions.join("  ·  "));
+      } else if (result.user_message) {
+        pieces.push(result.user_message);
+      }
+      return pieces.join("\n");
     },
 
     renderMarkdown(content) {
