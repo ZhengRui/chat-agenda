@@ -4,6 +4,10 @@ Chat Agenda is a static browser app for generating and editing Toastmasters meet
 
 You paste raw meeting registration text, the app turns it into a structured agenda, and you can keep refining that agenda through chat or direct manipulation in the UI. The codebase also contains pure helper modules for provider-specific request building, streaming response parsing, and conversation history translation across OpenAI-style, Anthropic, and Gemini APIs.
 
+## Screenshot
+
+![Chat Agenda screenshot](example.png)
+
 ## What It Does
 
 - Generates a meeting agenda from WeChat-style registration text.
